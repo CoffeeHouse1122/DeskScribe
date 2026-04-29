@@ -1,0 +1,63 @@
+{
+  "name": "deskscribe",
+  "version": "0.1.0",
+  "description": "Compact desktop recorder and transcription app.",
+  "productName": "DeskScribe",
+  "main": "dist/main/index.js",
+  "private": true,
+  "scripts": {
+    "dev": "npm-run-all -p dev:renderer dev:electron",
+    "dev:renderer": "vite --host 127.0.0.1 --port 4173",
+    "dev:electron": "wait-on tcp:4173 && npm run prepare:resources && npm run build:main && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:4173 electron .",
+    "prepare:resources": "node scripts/prepare-resources.cjs",
+    "build": "npm-run-all prepare:resources build:main build:renderer",
+    "build:main": "tsc -p tsconfig.main.json",
+    "build:renderer": "vite build",
+    "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.json --noEmit",
+    "dist": "npm run build && electron-builder"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.1",
+    "cross-env": "^7.0.3",
+    "electron": "^35.1.5",
+    "electron-builder": "^26.0.12",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.8.3",
+    "vite": "^6.2.6",
+    "wait-on": "^8.0.3"
+  },
+  "build": {
+    "appId": "com.deskscribe.app",
+    "productName": "DeskScribe",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      "resources/**/*"
+    ],
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.productivity",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "DeskScribe needs microphone access to record and transcribe audio."
+      }
+    },
+    "win": {
+      "target": "dir"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.3.0",
+    "remixicon": "^4.9.1"
+  }
+}

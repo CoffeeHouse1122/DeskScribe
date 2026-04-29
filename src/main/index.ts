@@ -1,0 +1,180 @@
+import {
+  app,
+  BrowserWindow,
+  Menu,
+  Tray,
+  nativeImage
+} from "electron";
+import path from "node:path";
+import { registerIpc } from "./ipc";
+import { loadPreferences } from "./preferences";
+
+let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
+let isQuitting = false;
+
+const singleInstance = app.requestSingleInstanceLock();
+if (!singleInstance) {
+  app.quit();
+}
+
+function rendererUrl() {
+  return process.env.VITE_DEV_SERVER_URL || `file://${path.join(app.getAppPath(), "dist/renderer/index.html")}`;
+}
+
+function createTrayImage() {
+  const size = 32;
+  const buffer = Buffer.alloc(size * size * 4);
+
+  function setPixel(x: number, y: number, red: number, green: number, blue: number, alpha = 255) {
+    if (x < 0 || y < 0 || x >= size || y >= size) return;
+    const index = (y * size + x) * 4;
+    buffer[index] = blue;
+    buffer[index + 1] = green;
+    buffer[index + 2] = red;
+    buffer[index + 3] = alpha;
+  }
+
+  function drawCircle(cx: number, cy: number, radius: number, red: number, green: number, blue: number, alpha = 255) {
+    const radiusSquared = radius * radius;
+    for (let y = Math.floor(cy - radius); y <= Math.ceil(cy + radius); y += 1) {
+      for (let x = Math.floor(cx - radius); x <= Math.ceil(cx + radius); x += 1) {
+        const distanceSquared = (x - cx) ** 2 + (y - cy) ** 2;
+        if (distanceSquared <= radiusSquared) {
+          setPixel(x, y, red, green, blue, alpha);
+        }
+      }
+    }
+  }
+
+  function drawLine(x1: number, y1: number, x2: number, y2: number, width: number, red: number, green: number, blue: number) {
+    const steps = Math.max(Math.abs(x2 - x1), Math.abs(y2 - y1)) * 2;
+    for (let step = 0; step <= steps; step += 1) {
+      const rate = step / steps;
+      const x = Math.round(x1 + (x2 - x1) * rate);
+      const y = Math.round(y1 + (y2 - y1) * rate);
+      drawCircle(x, y, width, red, green, blue);
+    }
+  }
+
+  drawCircle(16, 16, 15, 245, 248, 255);
+  drawCircle(16, 16, 13, 154, 226, 238);
+  drawLine(10, 21, 21, 10, 2, 70, 92, 99);
+  drawCircle(9, 10, 3, 70, 92, 99);
+  drawCircle(10, 22, 3, 70, 92, 99);
+  drawCircle(22, 9, 3, 70, 92, 99);
+  drawCircle(22, 22, 2, 70, 92, 99);
+  drawCircle(16, 16, 2, 70, 92, 99);
+
+  const image = nativeImage.createFromBitmap(buffer, { width: size, height: size, scaleFactor: 1 });
+  image.setTemplateImage(false);
+  return image;
+}
+
+async function showMainWindow() {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+async function buildTrayMenu() {
+  const preferences = await loadPreferences();
+  return Menu.buildFromTemplate([
+    {
+      label: "Open DeskScribe",
+      click: () => {
+        void showMainWindow();
+      }
+    },
+    {
+      label: preferences.closeBehavior === "tray" ? "Hide to Tray Enabled" : "Quit on Close Enabled",
+      enabled: false
+    },
+    { type: "separator" },
+    {
+      label: "Quit",
+      click: () => {
+        isQuitting = true;
+        app.quit();
+      }
+    }
+  ]);
+}
+
+async function refreshTray() {
+  if (!tray) return;
+  tray.setContextMenu(await buildTrayMenu());
+}
+
+function attachWindowGuards(window: BrowserWindow) {
+  window.on("close", async (event) => {
+    if (isQuitting) {
+      return;
+    }
+    const preferences = await loadPreferences();
+    if (preferences.closeBehavior === "tray") {
+      event.preventDefault();
+      window.hide();
+    }
+  });
+}
+
+async function createMainWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1120,
+    height: 720,
+    minWidth: 1040,
+    minHeight: 660,
+    backgroundColor: "#f4f8ff",
+    show: true,
+    title: "DeskScribe",
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(app.getAppPath(), "dist/preload/index.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      backgroundThrottling: false
+    }
+  });
+
+  attachWindowGuards(mainWindow);
+
+  if (process.env.VITE_DEV_SERVER_URL) {
+    await mainWindow.loadURL(rendererUrl());
+  } else {
+    await mainWindow.loadFile(path.join(app.getAppPath(), "dist/renderer/index.html"));
+  }
+}
+
+async function createTray() {
+  tray = new Tray(createTrayImage());
+  tray.setToolTip("DeskScribe");
+  tray.on("click", () => {
+    void showMainWindow();
+  });
+  tray.on("double-click", () => {
+    void showMainWindow();
+  });
+  await refreshTray();
+}
+
+app.on("second-instance", () => {
+  void showMainWindow();
+});
+
+app.on("before-quit", () => {
+  isQuitting = true;
+});
+
+app.on("activate", () => {
+  void showMainWindow();
+});
+
+app.whenReady().then(async () => {
+  registerIpc();
+  await createMainWindow();
+  await createTray();
+});

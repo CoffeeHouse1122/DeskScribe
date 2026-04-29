@@ -1,0 +1,9 @@
+node_modules/
+dist/
+release/
+.vite/
+resources/bin/Release/
+resources/models/*.bin
+resources/models/*.gguf
+*.log
+tmp-*/
