@@ -9,16 +9,18 @@ if (!ffmpegPath || !fs.existsSync(ffmpegPath)) {
 
 const projectRoot = path.resolve(__dirname, "..");
 const releaseDir = path.join(projectRoot, "resources", "bin", "Release");
-const targetName = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
+const isWindows = process.platform === "win32";
+const isMac = process.platform === "darwin";
+const targetName = isWindows ? "ffmpeg.exe" : "ffmpeg";
 const targetPath = path.join(releaseDir, targetName);
-const whisperName = process.platform === "win32" ? "whisper-cli.exe" : "whisper-cli";
+const whisperName = isWindows ? "whisper-cli.exe" : "whisper-cli";
 const whisperPath = path.join(releaseDir, whisperName);
-const pythonName = process.platform === "win32" ? "python.exe" : "python";
+const pythonName = isWindows ? "python.exe" : "python";
 const pythonPath = path.join(
   projectRoot,
   "resources",
   "python",
-  process.platform === "win32" ? "Scripts" : "bin",
+  isWindows ? "Scripts" : "bin",
   pythonName
 );
 const fasterWhisperModelPath = path.join(
@@ -34,6 +36,12 @@ const whisperCppModelPath = path.join(
   "resources",
   "models",
   "ggml-small.bin"
+);
+const appIconPath = path.join(
+  projectRoot,
+  "resources",
+  "icons",
+  isMac ? "icon.icns" : isWindows ? "icon.ico" : "icon.png"
 );
 
 fs.mkdirSync(releaseDir, { recursive: true });
@@ -60,14 +68,19 @@ if (!fs.existsSync(whisperCppModelPath)) {
 console.log(`Verified bundled whisper.cpp model: ${whisperCppModelPath}`);
 
 if (!fs.existsSync(pythonPath)) {
-  console.warn(`Bundled Faster-Whisper Python runtime was not found: ${pythonPath}`);
-  console.warn("Faster-Whisper will fall back to system Python if available.");
-} else {
-  console.log(`Verified bundled Faster-Whisper Python runtime: ${pythonPath}`);
+  throw new Error(`Bundled Faster-Whisper Python runtime was not found: ${pythonPath}`);
 }
+
+console.log(`Verified bundled Faster-Whisper Python runtime: ${pythonPath}`);
 
 if (!fs.existsSync(fasterWhisperModelPath)) {
   throw new Error(`Bundled Faster-Whisper model was not found: ${fasterWhisperModelPath}`);
 }
 
 console.log(`Verified bundled Faster-Whisper model: ${fasterWhisperModelPath}`);
+
+if (!fs.existsSync(appIconPath)) {
+  throw new Error(`Application icon was not found for ${process.platform}: ${appIconPath}`);
+}
+
+console.log(`Verified application icon: ${appIconPath}`);

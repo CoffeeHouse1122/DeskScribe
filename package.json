@@ -1,6 +1,6 @@
 {
   "name": "deskscribe",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Compact desktop recorder and transcription app.",
   "productName": "DeskScribe",
   "main": "dist/main/index.js",
@@ -39,10 +39,23 @@
       "dist/**/*",
       "package.json"
     ],
+    "afterPack": "build/afterPack.cjs",
     "extraResources": [
       {
         "from": "resources/bin",
-        "to": "resources/bin"
+        "to": "resources/bin",
+        "filter": [
+          "Release/ffmpeg",
+          "Release/ffmpeg.exe",
+          "Release/whisper-cli",
+          "Release/whisper-cli.exe",
+          "Release/whisper.dll",
+          "Release/libwhisper*",
+          "Release/ggml*",
+          "Release/libggml*",
+          "Release/*.dylib",
+          "Release/*.so*"
+        ]
       },
       {
         "from": "resources/docs",
@@ -64,7 +77,17 @@
       },
       {
         "from": "resources/python",
-        "to": "resources/python"
+        "to": "resources/python",
+        "filter": [
+          "**/*",
+          "!**/__pycache__",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!**/*.pyo",
+          "!**/tests/**",
+          "!**/test/**",
+          "!**/.pytest_cache/**"
+        ]
       },
       {
         "from": "resources/scripts",
