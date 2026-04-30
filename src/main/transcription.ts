@@ -21,11 +21,18 @@ import type {
 } from "../shared/types";
 
 type ProgressReporter = (event: TranscriptionProgressEvent) => void;
+type CommandProgressWindow = {
+  base: number;
+  span: number;
+  message: string;
+};
 
 const FFMPEG_TIMEOUT_MS = 20 * 60 * 1000;
 const WHISPER_TIMEOUT_MS = 3 * 60 * 60 * 1000;
-const WHISPER_CHUNK_SECONDS = 180;
-const WHISPER_CHUNK_MS = WHISPER_CHUNK_SECONDS * 1000;
+const WHISPER_SAFE_CHUNK_SECONDS = 60;
+const WHISPER_BALANCED_CHUNK_SECONDS = 180;
+const WHISPER_QUANTIZED_CHUNK_SECONDS = 600;
+const WHISPER_GPU_CHUNK_SECONDS = 900;
 
 export class TranscriptionCancelledError extends Error {
   constructor() {
@@ -91,11 +98,23 @@ async function exists(filePath: string) {
 function modelRank(fileName: string) {
   const normalized = fileName.toLowerCase();
   if (normalized.includes("tiny")) return 0;
-  if (normalized.includes("base")) return 1;
-  if (normalized.includes("small")) return 2;
-  if (normalized.includes("medium")) return 3;
-  if (normalized.includes("large")) return 4;
+  if (normalized.includes("base")) return 10;
+  if (normalized.includes("small")) return 20;
+  if (normalized.includes("medium")) return 30;
+  if (normalized.includes("large")) return 40;
   return 2;
+}
+
+function modelStabilityRank(fileName: string, size: number) {
+  const normalized = fileName.toLowerCase();
+  const quality = modelRank(fileName) * 100;
+  const quantizedBonus =
+    /q8[_-]?0/i.test(normalized) ? 18 :
+    /q5[_-]?[01]/i.test(normalized) ? 16 :
+    /q4[_-]?[01]/i.test(normalized) ? 8 :
+    0;
+  const memoryPenalty = size > 2_500_000_000 ? 14 : size > 1_500_000_000 ? 6 : 0;
+  return quality + quantizedBonus - memoryPenalty;
 }
 
 async function bundledModelCandidates() {
@@ -116,7 +135,10 @@ async function bundledModelCandidates() {
       // Try the next possible resources directory.
     }
   }
-  return models.sort((left, right) => modelRank(left.fileName) - modelRank(right.fileName) || left.size - right.size);
+  return models.sort((left, right) =>
+    modelStabilityRank(right.fileName, right.size) - modelStabilityRank(left.fileName, left.size) ||
+    right.size - left.size
+  );
 }
 
 async function findBundledModel() {
@@ -127,19 +149,76 @@ async function findBundledModel() {
   return "";
 }
 
+async function resolveModelPath(preferences: AppPreferences, logs: string[]) {
+  const preferredModelPath = preferences.modelPath?.trim();
+  if (preferredModelPath) {
+    if (await exists(preferredModelPath)) {
+      pushLog(logs, `Using preferred Whisper model: ${preferredModelPath}`);
+      return preferredModelPath;
+    }
+    pushLog(logs, `Preferred Whisper model missing, falling back to bundled model: ${preferredModelPath}`);
+  }
+
+  const builtInModelPath = await findBundledModel();
+  if (builtInModelPath) {
+    pushLog(logs, `Using bundled Whisper model: ${builtInModelPath}`);
+  }
+  return builtInModelPath;
+}
+
+async function warnIfHighMemoryModel(modelPath: string, logs: string[]) {
+  const stat = await fs.stat(modelPath).catch(() => null);
+  if (stat && stat.size > 2_500_000_000) {
+    pushLog(
+      logs,
+      "The selected Whisper model is larger than 2.5GB. For long imports, a quantized large-v3 model such as Q8_0 or Q5_0 usually keeps accuracy high while reducing crash risk."
+    );
+  }
+}
+
+async function chooseWhisperChunkSeconds(modelPath: string, preferences: AppPreferences, logs: string[]) {
+  if (!preferences.disableGpu) {
+    pushLog(logs, `GPU mode uses ${WHISPER_GPU_CHUNK_SECONDS}s chunks to reduce model reload overhead.`);
+    return WHISPER_GPU_CHUNK_SECONDS;
+  }
+
+  const stat = await fs.stat(modelPath).catch(() => null);
+  if (stat && stat.size <= 1_500_000_000) {
+    pushLog(logs, `Quantized or compact model detected; using ${WHISPER_QUANTIZED_CHUNK_SECONDS}s chunks.`);
+    return WHISPER_QUANTIZED_CHUNK_SECONDS;
+  }
+
+  pushLog(logs, `High-memory model detected; using safer ${WHISPER_SAFE_CHUNK_SECONDS}s chunks.`);
+  return WHISPER_SAFE_CHUNK_SECONDS;
+}
+
+function fallbackChunkSeconds(currentSeconds: number) {
+  if (currentSeconds > WHISPER_QUANTIZED_CHUNK_SECONDS) return WHISPER_QUANTIZED_CHUNK_SECONDS;
+  if (currentSeconds > WHISPER_BALANCED_CHUNK_SECONDS) return WHISPER_BALANCED_CHUNK_SECONDS;
+  if (currentSeconds > WHISPER_SAFE_CHUNK_SECONDS) return WHISPER_SAFE_CHUNK_SECONDS;
+  return 0;
+}
+
 function executableName(baseName: string) {
   return process.platform === "win32" ? `${baseName}.exe` : baseName;
 }
 
-function whisperCandidates() {
+function executablePathCandidates(preferredPath: string | undefined, bundledPaths: string[]) {
+  const preferred = preferredPath?.trim();
+  return uniquePaths(preferred ? [preferred, ...bundledPaths] : bundledPaths);
+}
+
+function whisperCandidates(preferences: AppPreferences) {
   return uniquePaths([
+    ...executablePathCandidates(preferences.whisperExecutablePath, []),
     ...resourcePathCandidates("bin", "Release", executableName("whisper-cli")),
     ...resourcePathCandidates("bin", executableName("whisper-cli"))
   ]);
 }
 
-function ffmpegCandidates() {
+function ffmpegCandidates(preferences?: AppPreferences) {
   return uniquePaths([
+    ...executablePathCandidates(preferences?.ffmpegExecutablePath, []),
     ...resourcePathCandidates("bin", "Release", executableName("ffmpeg")),
     ...resourcePathCandidates("bin", executableName("ffmpeg"))
   ]);
@@ -152,6 +231,14 @@ function pushLog(logs: string[], line: string) {
   }
 }
 
+function parseCliPercent(line: string) {
+  const match = line.match(/(?:progress\s*=\s*|^|\s)(\d{1,3}(?:\.\d+)?)\s*%/i);
+  if (!match) return undefined;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value)) return undefined;
+  return Math.max(0, Math.min(100, value));
+}
+
 async function runCandidate(
   executable: string,
   args: string[],
@@ -159,7 +246,8 @@ async function runCandidate(
   stage: TranscriptionProgressEvent["stage"],
   timeoutMs: number,
   report?: ProgressReporter,
-  controller?: TranscriptionController
+  controller?: TranscriptionController,
+  progressWindow?: CommandProgressWindow
 ) {
   return new Promise<void>((resolve, reject) => {
     if (controller?.cancelled) {
@@ -170,6 +258,7 @@ async function runCandidate(
     let settled = false;
     let lastOutputAt = 0;
     const child = spawn(executable, args, {
+      cwd: path.dirname(executable),
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"]
     });
@@ -196,8 +285,8 @@ async function runCandidate(
       const elapsedMs = Date.now() - startedAt;
       report?.({
         stage,
-        message: stage === "normalizing" ? "正在转换音频格式" : "正在识别语音内容",
-        progress: stage === "normalizing" ? 32 : undefined,
+        message: progressWindow?.message || (stage === "normalizing" ? "正在转换音频格式" : "正在识别语音内容"),
+        progress: stage === "normalizing" ? 32 : progressWindow ? Math.round(progressWindow.base) : undefined,
         elapsedMs
       });
     }, 5000);
@@ -216,13 +305,16 @@ async function runCandidate(
       if (!line) return;
       pushLog(logs, line);
       const now = Date.now();
+      const cliPercent = stage === "transcribing" ? parseCliPercent(line) : undefined;
       if (now - lastOutputAt > 900) {
         lastOutputAt = now;
         report?.({
           stage,
-          message: stage === "normalizing" ? "正在转换音频格式" : "正在识别语音内容",
+          message: progressWindow?.message || (stage === "normalizing" ? "正在转换音频格式" : "正在识别语音内容"),
           detail: line.slice(0, 240),
-          progress: stage === "normalizing" ? 42 : undefined,
+          progress: cliPercent !== undefined && progressWindow
+            ? Math.round(progressWindow.base + (cliPercent / 100) * progressWindow.span)
+            : stage === "normalizing" ? 42 : undefined,
           elapsedMs: now - startedAt
         });
       }
@@ -258,7 +350,8 @@ async function runWithCandidates(
   stage: TranscriptionProgressEvent["stage"],
   timeoutMs: number,
   report?: ProgressReporter,
-  controller?: TranscriptionController
+  controller?: TranscriptionController,
+  progressWindow?: CommandProgressWindow
 ) {
   let lastError: unknown = new Error(missingMessage);
   for (const candidate of candidates) {
@@ -270,7 +363,7 @@ async function runWithCandidates(
         pushLog(logs, `Candidate missing: ${candidate}`);
         continue;
       }
-      await runCandidate(candidate, args, logs, stage, timeoutMs, report, controller);
+      await runCandidate(candidate, args, logs, stage, timeoutMs, report, controller, progressWindow);
       return candidate;
     } catch (error) {
       if (isTranscriptionCancelled(error)) {
@@ -316,7 +409,7 @@ async function normalizeAudio(inputPath: string, tempDir: string, preferences: A
     outputPath
   ];
   await runWithCandidates(
-    ffmpegCandidates(),
+    ffmpegCandidates(preferences),
     args,
     logs,
     "Unable to locate bundled FFmpeg. Rebuild or reinstall DeskScribe so resources/bin/Release contains ffmpeg.",
@@ -329,26 +422,33 @@ async function normalizeAudio(inputPath: string, tempDir: string, preferences: A
   return outputPath;
 }
 
-async function splitNormalizedAudio(normalizedPath: string, tempDir: string, logs: string[], report?: ProgressReporter, controller?: TranscriptionController) {
+async function splitAudioFile(
+  inputPath: string,
+  chunksDir: string,
+  outputPrefix: string,
+  preferences: AppPreferences,
+  chunkSeconds: number,
+  logs: string[],
+  report?: ProgressReporter,
+  controller?: TranscriptionController
+) {
   if (controller?.cancelled) {
     throw new TranscriptionCancelledError();
   }
-  const chunksDir = path.join(tempDir, "chunks");
   await ensureDir(chunksDir);
-  const outputPattern = path.join(chunksDir, "chunk-%04d.wav");
-  report?.({ stage: "normalizing", message: "正在拆分音频以降低转写内存占用", progress: 52 });
+  const outputPattern = path.join(chunksDir, `${outputPrefix}-%04d.wav`);
   await runWithCandidates(
-    ffmpegCandidates(),
+    ffmpegCandidates(preferences),
     [
       "-hide_banner",
       "-nostdin",
       "-y",
       "-i",
-      normalizedPath,
+      inputPath,
       "-f",
       "segment",
       "-segment_time",
-      String(WHISPER_CHUNK_SECONDS),
+      String(chunkSeconds),
       "-reset_timestamps",
       "1",
       "-c",
@@ -363,15 +463,37 @@ async function splitNormalizedAudio(normalizedPath: string, tempDir: string, log
     controller
   );
   const chunkPaths = (await fs.readdir(chunksDir))
-    .filter((name) => /^chunk-\d+\.wav$/i.test(name))
+    .filter((name) => new RegExp(`^${outputPrefix}-\\d+\\.wav$`, "i").test(name))
     .sort()
     .map((name) => path.join(chunksDir, name));
   if (chunkPaths.length === 0) {
-    pushLog(logs, "No split chunks were created; falling back to the normalized audio file.");
-    return [normalizedPath];
+    pushLog(logs, `No split chunks were created for ${path.basename(inputPath)}; falling back to the original audio file.`);
+    return [inputPath];
   }
-  pushLog(logs, `Audio split into ${chunkPaths.length} chunk(s) of up to ${WHISPER_CHUNK_SECONDS} seconds.`);
+  pushLog(logs, `Audio split into ${chunkPaths.length} chunk(s) of up to ${chunkSeconds} seconds.`);
   return chunkPaths;
+}
+
+async function splitNormalizedAudio(
+  normalizedPath: string,
+  tempDir: string,
+  preferences: AppPreferences,
+  chunkSeconds: number,
+  logs: string[],
+  report?: ProgressReporter,
+  controller?: TranscriptionController
+) {
+  report?.({ stage: "normalizing", message: "正在拆分音频以降低转写内存占用", progress: 52 });
+  return splitAudioFile(
+    normalizedPath,
+    path.join(tempDir, "chunks"),
+    "chunk",
+    preferences,
+    chunkSeconds,
+    logs,
+    report,
+    controller
+  );
 }
 
 export async function exportRecordingAudio(input: RecordingAudioExportRequest, outputPath: string) {
@@ -464,17 +586,26 @@ function parseWhisperOutput(
   };
 }
 
-async function runWhisperChunk(
+function isLikelyEmptyAudioWhisperFailure(error: unknown, chunkLogs: string[]) {
+  const message = error instanceof Error ? error.message : String(error);
+  const joinedLogs = chunkLogs.join("\n");
+  return /whisper-cli(?:\.exe)? exited with code 1/i.test(message) &&
+    /processing|auto-detected language/i.test(joinedLogs) &&
+    !/error|failed|invalid|unable|cannot|exception|abort/i.test(joinedLogs);
+}
+
+function isWhisperRuntimeCrash(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /whisper-cli(?:\.exe)? exited with code 3221226505/i.test(message);
+}
+
+function buildWhisperArgs(
   chunkPath: string,
   outputBase: string,
   modelPath: string,
   language: TranscriptLanguage,
-  logs: string[],
-  sourceType: "recording" | "file",
-  fileName: string,
-  offsetMs: number,
-  report?: ProgressReporter,
-  controller?: TranscriptionController
+  preferences: AppPreferences,
+  compatibilityMode = false
 ) {
   const args = [
     "-m",
@@ -496,29 +627,62 @@ async function runWhisperChunk(
     "1",
     "-mc",
     "0",
-    "-ng",
     "-nfa",
-    "-pp",
-    "-sns",
-    "--suppress-regex",
-    "(?i)subtitles by the amara\\.org community|amara\\.org"
+    "-pp"
   ];
-  const prompt = languagePrompt(language);
+  if (!compatibilityMode) {
+    args.push("-sns");
+  }
+  if (preferences.disableGpu) {
+    args.push("-ng");
+  }
+  const prompt = compatibilityMode ? "" : languagePrompt(language);
   if (prompt) {
     args.push("--prompt", prompt, "--carry-initial-prompt");
   }
+  return args;
+}
 
-  const executable = await runWithCandidates(
-    whisperCandidates(),
+async function runWhisperChunk(
+  chunkPath: string,
+  outputBase: string,
+  modelPath: string,
+  language: TranscriptLanguage,
+  preferences: AppPreferences,
+  logs: string[],
+  sourceType: "recording" | "file",
+  fileName: string,
+  offsetMs: number,
+  progressWindow: CommandProgressWindow,
+  report?: ProgressReporter,
+  controller?: TranscriptionController
+) {
+  const outputPath = `${outputBase}.json`;
+  const logStart = logs.length;
+  let executable = "";
+  const runArgs = async (args: string[]) => runWithCandidates(
+    whisperCandidates(preferences),
     args,
     logs,
     "Unable to locate bundled whisper.cpp CLI. Rebuild or reinstall DeskScribe so resources/bin/Release contains whisper-cli.",
     "transcribing",
     WHISPER_TIMEOUT_MS,
     report,
-    controller
+    controller,
+    progressWindow
   );
-  const outputPath = `${outputBase}.json`;
+  try {
+    executable = await runArgs(buildWhisperArgs(chunkPath, outputBase, modelPath, language, preferences));
+  } catch (error) {
+    if (isWhisperRuntimeCrash(error)) {
+      pushLog(logs, `whisper-cli crashed on ${path.basename(chunkPath)}; retrying with compatibility parameters.`);
+      executable = await runArgs(buildWhisperArgs(chunkPath, outputBase, modelPath, language, preferences, true));
+    } else if (!isLikelyEmptyAudioWhisperFailure(error, logs.slice(logStart))) {
+      throw error;
+    } else {
+      pushLog(logs, `No speech was detected in ${path.basename(chunkPath)}; treating it as an empty audio segment.`);
+    }
+  }
   let raw = "";
   try {
     raw = await fs.readFile(outputPath, "utf8");
@@ -534,6 +698,100 @@ async function runWhisperChunk(
     outputPath,
     executable
   };
+}
+
+async function runWhisperChunkWithFallback(
+  chunkPath: string,
+  outputBase: string,
+  modelPath: string,
+  language: TranscriptLanguage,
+  preferences: AppPreferences,
+  logs: string[],
+  sourceType: "recording" | "file",
+  fileName: string,
+  offsetMs: number,
+  chunkSeconds: number,
+  progressWindow: CommandProgressWindow,
+  report?: ProgressReporter,
+  controller?: TranscriptionController
+): Promise<{ documents: TranscriptDocument[]; executable: string }> {
+  try {
+    const result = await runWhisperChunk(
+      chunkPath,
+      outputBase,
+      modelPath,
+      language,
+      preferences,
+      logs,
+      sourceType,
+      fileName,
+      offsetMs,
+      progressWindow,
+      report,
+      controller
+    );
+    return { documents: [result.document], executable: result.executable };
+  } catch (error) {
+    const nextChunkSeconds = fallbackChunkSeconds(chunkSeconds);
+    if (!isWhisperRuntimeCrash(error) || nextChunkSeconds <= 0) {
+      throw error;
+    }
+
+    pushLog(
+      logs,
+      `Chunk ${path.basename(chunkPath)} crashed at ${chunkSeconds}s; splitting it into ${nextChunkSeconds}s fallback chunks.`
+    );
+    report?.({
+      stage: "transcribing",
+      message: `当前片段较大，正在拆成 ${nextChunkSeconds} 秒小片段重试`,
+      progress: Math.round(progressWindow.base)
+    });
+
+    const fallbackDir = path.join(path.dirname(outputBase), `fallback-${uniqueId("chunk")}`);
+    const fallbackChunks = await splitAudioFile(
+      chunkPath,
+      fallbackDir,
+      "chunk",
+      preferences,
+      nextChunkSeconds,
+      logs,
+      report,
+      controller
+    );
+    const documents: TranscriptDocument[] = [];
+    let executable = "";
+
+    for (const [index, fallbackChunk] of fallbackChunks.entries()) {
+      const childBase = progressWindow.base + (index / Math.max(1, fallbackChunks.length)) * progressWindow.span;
+      const childSpan = progressWindow.span / Math.max(1, fallbackChunks.length);
+      const childMessage = `${progressWindow.message} · 重试 ${index + 1}/${fallbackChunks.length}`;
+      const result = await runWhisperChunkWithFallback(
+        fallbackChunk,
+        `${outputBase}-fallback-${String(index).padStart(3, "0")}`,
+        modelPath,
+        language,
+        preferences,
+        logs,
+        sourceType,
+        fileName,
+        offsetMs + index * nextChunkSeconds * 1000,
+        nextChunkSeconds,
+        {
+          base: childBase,
+          span: childSpan,
+          message: childMessage
+        },
+        report,
+        controller
+      );
+      documents.push(...result.documents);
+      if (result.executable) {
+        executable = result.executable;
+      }
+    }
+
+    return { documents, executable };
+  }
 }
 
 function mergeTranscriptDocuments(
@@ -578,8 +836,7 @@ async function runWhisper(
   controller?: TranscriptionController
 ) {
   report?.({ stage: "transcribing", message: "正在加载 Whisper 模型", progress: 54 });
-  const builtInModelPath = await findBundledModel();
-  const modelPath = builtInModelPath || preferences.modelPath;
+  const modelPath = await resolveModelPath(preferences, logs);
 
   if (!modelPath) {
     throw new Error(
@@ -587,43 +844,61 @@ async function runWhisper(
     );
   }
 
-  if (!preferences.disableGpu) {
-    pushLog(logs, "GPU preference is ignored for stability; using bundled whisper-cli in CPU mode.");
-  }
+  pushLog(
+    logs,
+    preferences.disableGpu
+      ? "Using whisper-cli in CPU stable mode."
+      : "GPU mode requested; DeskScribe will not pass --no-gpu. Use a GPU-enabled whisper-cli build for hardware acceleration."
+  );
+  await warnIfHighMemoryModel(modelPath, logs);
+  const chunkSeconds = await chooseWhisperChunkSeconds(modelPath, preferences, logs);
+  const chunkMs = chunkSeconds * 1000;
 
-  const chunks = await splitNormalizedAudio(normalizedPath, tempDir, logs, report, controller);
+  const chunks = await splitNormalizedAudio(normalizedPath, tempDir, preferences, chunkSeconds, logs, report, controller);
   const documents: TranscriptDocument[] = [];
   let executable = "";
   for (const [index, chunkPath] of chunks.entries()) {
     if (controller?.cancelled) {
       throw new TranscriptionCancelledError();
     }
+    const chunkProgressBase = 56 + (index / Math.max(1, chunks.length)) * 32;
+    const chunkProgressSpan = 32 / Math.max(1, chunks.length);
+    const chunkMessage = `正在识别语音内容（${index + 1}/${chunks.length}）`;
     report?.({
       stage: "transcribing",
-      message: `正在识别语音内容（${index + 1}/${chunks.length}）`,
-      progress: 56 + Math.round((index / Math.max(1, chunks.length)) * 32)
+      message: chunkMessage,
+      progress: Math.round(chunkProgressBase)
     });
-    const result = await runWhisperChunk(
+    const result = await runWhisperChunkWithFallback(
       chunkPath,
       path.join(tempDir, `transcript-${String(index).padStart(4, "0")}`),
       modelPath,
       language,
+      preferences,
       logs,
       sourceType,
       fileName,
-      index * WHISPER_CHUNK_MS,
+      index * chunkMs,
+      chunkSeconds,
+      {
+        base: chunkProgressBase,
+        span: chunkProgressSpan,
+        message: chunkMessage
+      },
       report,
       controller
     );
-    documents.push(result.document);
-    executable = result.executable;
+    documents.push(...result.documents);
+    if (result.executable) {
+      executable = result.executable;
+    }
   }
 
   report?.({ stage: "finalizing", message: "正在整理转写结果", progress: 92 });
   const outputPath = path.join(tempDir, "transcript-merged.json");
   const document = mergeTranscriptDocuments(documents, sourceType, fileName, language, modelPath);
   await fs.writeFile(outputPath, JSON.stringify(document, null, 2), "utf8");
-  pushLog(logs, `Transcribed with ${path.basename(executable)}`);
+  pushLog(logs, executable ? `Transcribed with ${path.basename(executable)}` : "Transcribed without detected speech.");
   return { document, outputPath };
 }
 

@@ -196,12 +196,28 @@ export function mountApp(root: HTMLDivElement) {
             </label>
 
             <label class="field checkbox-field">
-              <input id="disable-gpu-checkbox" type="checkbox" checked disabled />
-              <span>CPU 稳定模式</span>
+              <input id="disable-gpu-checkbox" type="checkbox" checked />
+              <span>CPU 稳定模式（关闭后尝试 GPU）</span>
             </label>
           </div>
 
           <div class="path-stack">
+            <div class="path-field">
+              <label class="field field-block">
+                <span>转写程序</span>
+                <input id="whisper-executable-input" type="text" readonly placeholder="默认使用内置 CPU 版；可选择 GPU 版 whisper-cli.exe" />
+              </label>
+              <button id="pick-whisper-executable" class="ghost-button icon-only-button" type="button" title="选择 whisper-cli" aria-label="选择 whisper-cli"><i class="ri-terminal-box-line" aria-hidden="true"></i></button>
+            </div>
+
+            <div class="path-field">
+              <label class="field field-block">
+                <span>转写模型</span>
+                <input id="model-path-input" type="text" readonly placeholder="默认使用内置模型，可选择量化 large-v3 模型" />
+              </label>
+              <button id="pick-model-file" class="ghost-button icon-only-button" type="button" title="选择 Whisper 模型" aria-label="选择 Whisper 模型"><i class="ri-cpu-line" aria-hidden="true"></i></button>
+            </div>
+
             <div class="path-field">
               <label class="field field-block">
                 <span>导出目录</span>
@@ -245,6 +261,10 @@ export function mountApp(root: HTMLDivElement) {
     closeBehaviorSelect: root.querySelector<HTMLElement>("#close-behavior-select")!,
     defaultLanguageSelect: root.querySelector<HTMLElement>("#default-language-select")!,
     disableGpuCheckbox: root.querySelector<HTMLInputElement>("#disable-gpu-checkbox")!,
+    whisperExecutableInput: root.querySelector<HTMLInputElement>("#whisper-executable-input")!,
+    pickWhisperExecutable: root.querySelector<HTMLButtonElement>("#pick-whisper-executable")!,
+    modelPathInput: root.querySelector<HTMLInputElement>("#model-path-input")!,
+    pickModelFile: root.querySelector<HTMLButtonElement>("#pick-model-file")!,
     exportDirectoryInput: root.querySelector<HTMLInputElement>("#export-directory-input")!,
     pickExportDirectory: root.querySelector<HTMLButtonElement>("#pick-export-directory")!
   };
@@ -396,7 +416,8 @@ export function mountApp(root: HTMLDivElement) {
     setCustomSelectValue(refs.closeBehaviorSelect, preferences.closeBehavior, true);
     setCustomSelectValue(refs.defaultLanguageSelect, preferences.defaultLanguage, true);
     refs.disableGpuCheckbox.checked = preferences.disableGpu;
-    refs.disableGpuCheckbox.disabled = true;
+    refs.whisperExecutableInput.value = preferences.whisperExecutablePath;
+    refs.modelPathInput.value = preferences.modelPath;
     refs.exportDirectoryInput.value = preferences.exportDirectory;
     setCustomSelectValue(refs.languageSelect, preferences.defaultLanguage, true);
     applyTheme(preferences.theme);
@@ -439,7 +460,7 @@ export function mountApp(root: HTMLDivElement) {
       return "未找到内置 FFmpeg。请重新构建或安装包含 resources/bin/Release 的 DeskScribe。";
     }
     if (/whisper-cli(?:\.exe)? exited with code 3221226505/i.test(stripped)) {
-      return "内置 whisper-cli 运行时崩溃。当前已使用 CPU 低内存模式，若仍失败，请缩短音频或更换更小模型。";
+      return "whisper-cli 运行时崩溃。建议在设置中选择量化 large-v3 模型（Q8/Q5）或更小模型，再重试导入音频。";
     }
     if (/Transcription cancelled by user/i.test(stripped)) {
       return "已取消转写。";
@@ -788,14 +809,24 @@ export function mountApp(root: HTMLDivElement) {
     await persistPreferences();
   });
   refs.disableGpuCheckbox.addEventListener("change", async () => {
-    preferences.disableGpu = true;
-    refs.disableGpuCheckbox.checked = true;
+    preferences.disableGpu = refs.disableGpuCheckbox.checked;
     await persistPreferences();
+  });
+
+  refs.pickWhisperExecutable.addEventListener("click", () => {
+    void bindPicker(window.deskScribe.selectWhisperExecutable, (value) => {
+      preferences.whisperExecutablePath = value;
+    });
   });
 
   refs.pickExportDirectory.addEventListener("click", () => {
     void bindPicker(window.deskScribe.selectExportDirectory, (value) => {
       preferences.exportDirectory = value;
+    });
+  });
+  refs.pickModelFile.addEventListener("click", () => {
+    void bindPicker(window.deskScribe.selectModelFile, (value) => {
+      preferences.modelPath = value;
     });
   });
   void window.deskScribe.getPreferences().then((loaded) => {

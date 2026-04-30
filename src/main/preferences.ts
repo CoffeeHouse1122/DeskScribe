@@ -27,14 +27,14 @@ export async function loadPreferences() {
   try {
     const raw = await fs.readFile(settingsPath(), "utf8");
     const parsed = JSON.parse(raw) as Partial<AppPreferences>;
-    return { ...defaults, ...parsed, disableGpu: true };
+    return { ...defaults, ...parsed };
   } catch {
     return defaults;
   }
 }
 
 export async function savePreferences(next: AppPreferences) {
-  const merged = { ...getDefaultPreferences(), ...next, disableGpu: true };
+  const merged = { ...getDefaultPreferences(), ...next };
   await fs.mkdir(app.getPath("userData"), { recursive: true });
   await fs.writeFile(settingsPath(), JSON.stringify(merged, null, 2), "utf8");
   return merged;

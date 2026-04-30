@@ -118,6 +118,7 @@ body {
   height: 100%;
   overflow: hidden;
   font-family: var(--font-ui);
+  font-size: 14px;
   background: var(--bg);
   color: var(--text);
 }
@@ -150,11 +151,11 @@ button {
   position: relative;
   width: 100%;
   height: 100%;
-  min-width: 1000px;
+  min-width: 920px;
   min-height: 620px;
-  max-width: 1240px;
+  max-width: 1180px;
   margin: 0 auto;
-  padding: 14px 16px;
+  padding: 12px 14px;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
@@ -237,7 +238,7 @@ h2 i {
 
 .chip,
 .state-pill {
-  border: 1px solid var(--pill-border);
+  /* border: 1px solid var(--pill-border); */
   border-radius: 8px;
   padding: 6px 10px;
   font-size: 12px;
@@ -248,7 +249,7 @@ h2 i {
 
 .workspace {
   display: grid;
-  grid-template-columns: 420px minmax(560px, 1fr);
+  grid-template-columns: 390px minmax(500px, 1fr);
   gap: 12px;
   min-height: 0;
   overflow: hidden;
@@ -262,10 +263,12 @@ h2 i {
 }
 
 .column-compact {
-  grid-template-rows: minmax(300px, 1fr) minmax(112px, auto) minmax(108px, auto);
-  padding: 0;
+  /* grid-template-rows: 252px 122px 116px; */
+  align-content: start;
+  padding: 0 0 12px;
   background: transparent;
   border-right: 0;
+  overflow: auto;
 }
 
 .column-compact::-webkit-scrollbar,
@@ -299,8 +302,8 @@ h2 i {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 14px;
-  box-shadow: var(--shadow);
+  padding: 12px;
+  /* box-shadow: var(--shadow); */
   backdrop-filter: blur(14px);
 }
 
@@ -311,17 +314,22 @@ h2 i {
 }
 
 .column-compact > .panel {
-  border-color: var(--section-line);
-  background: var(--section-bg);
+  /* border-color: var(--section-line);
+  background: var(--section-bg); */
+  display: grid;
+  gap: 10px;
+  align-content: start;
 }
 
 .panel-primary {
   display: grid;
-  grid-template-rows: auto minmax(150px, 1fr) auto;
-  align-content: stretch;
-  background:
+  /* grid-template-rows: auto 62px auto; */
+  gap: 10px;
+  align-content: start;
+  padding-bottom: 16px;
+  /* background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 50%),
-    var(--panel);
+    var(--panel); */
 }
 
 .hero-panel::after {
@@ -335,6 +343,7 @@ h2 i {
 
 .content-column {
   grid-template-rows: minmax(228px, 268px) minmax(0, 1fr);
+  padding-bottom: 12px;
 }
 
 .process-panel {
@@ -346,13 +355,15 @@ h2 i {
 .transcript-panel {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+  padding-bottom: 16px;
   overflow: hidden;
 }
 
 .meter-wrap {
   align-self: center;
   gap: 16px;
-  margin: 16px 0;
+  margin: 0;
 }
 
 .meter-rail {
@@ -408,7 +419,7 @@ code {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
-  margin-top: 10px;
+  margin-top: 0;
   min-width: 0;
 }
 
@@ -428,6 +439,10 @@ code {
   transition: transform 120ms ease, background-color 120ms ease, border-color 120ms ease;
 }
 
+.button-row > button {
+  min-width: 0;
+}
+
 .topbar-actions .ghost-button,
 .settings-head .ghost-button,
 .path-field .ghost-button,
@@ -436,11 +451,12 @@ code {
 }
 
 .panel-primary .button-row {
-  margin-top: auto;
+  margin-top: 4px;
 }
 
 #export-recording {
   grid-column: 1 / -1;
+  max-width: 100%;
 }
 
 .icon-text-button,
@@ -449,6 +465,14 @@ code {
   align-items: center;
   justify-content: center;
   gap: 6px;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.icon-text-button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .icon-only-button {
@@ -492,8 +516,8 @@ code {
 .transcript-text {
   width: 100%;
   min-height: 0;
-  height: 100%;
-  margin-top: 12px;
+  height: auto;
+  margin-top: 0;
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -504,6 +528,7 @@ code {
   line-height: 1.65;
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--accent) 40%, transparent) transparent;
+  outline: none;
 }
 
 .info-grid {
@@ -770,4 +795,3 @@ code {
 .empty {
   padding: 6px 0;
 }
-
