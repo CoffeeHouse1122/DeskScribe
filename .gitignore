@@ -3,7 +3,10 @@ dist/
 release/
 .vite/
 resources/bin/Release/
+resources/python/
 resources/models/*.bin
+!resources/models/ggml-small.bin
 resources/models/*.gguf
+resources/models/faster-whisper/**/.cache/
 *.log
 tmp-*/

@@ -3,6 +3,8 @@ export type CloseBehavior = "tray" | "quit";
 export type TranscriptLanguage = "auto" | "zh" | "en";
 export type ExportFormat = "txt" | "srt" | "json";
 export type TranscriptionStage = "queued" | "normalizing" | "transcribing" | "finalizing" | "completed" | "failed" | "cancelled";
+export type TranscriptionEngine = "whisper-cpp" | "faster-whisper";
+export type FasterWhisperModel = "distil-large-v3" | "large-v3" | "small";
 
 export interface AppPreferences {
   theme: AppTheme;
@@ -13,6 +15,9 @@ export interface AppPreferences {
   ffmpegExecutablePath: string;
   modelPath: string;
   disableGpu: boolean;
+  transcriptionEngine: TranscriptionEngine;
+  fasterWhisperModel: FasterWhisperModel;
+  whisperThreads: number;
 }
 
 export interface TranscriptSegment {

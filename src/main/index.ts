@@ -1,10 +1,13 @@
 import {
   app,
   BrowserWindow,
+  desktopCapturer,
   Menu,
+  session,
   Tray,
   nativeImage
 } from "electron";
+import fs from "node:fs";
 import path from "node:path";
 import { registerIpc } from "./ipc";
 import { loadPreferences } from "./preferences";
@@ -20,6 +23,29 @@ if (!singleInstance) {
 
 function rendererUrl() {
   return process.env.VITE_DEV_SERVER_URL || `file://${path.join(app.getAppPath(), "dist/renderer/index.html")}`;
+}
+
+function iconPathCandidates() {
+  const iconName = process.platform === "win32" ? "icon.ico" : "icon.png";
+  return [
+    path.join(process.resourcesPath, "resources", "icons", iconName),
+    path.join(process.resourcesPath, "icons", iconName),
+    path.join(app.getAppPath(), "resources", "icons", iconName),
+    path.join(process.cwd(), "resources", "icons", iconName),
+    path.resolve(__dirname, "..", "..", "resources", "icons", iconName)
+  ];
+}
+
+function createAppIcon() {
+  for (const candidate of iconPathCandidates()) {
+    if (!fs.existsSync(candidate)) continue;
+    const image = nativeImage.createFromPath(candidate);
+    if (!image.isEmpty()) {
+      image.setTemplateImage(false);
+      return image;
+    }
+  }
+  return createTrayImage();
 }
 
 function createTrayImage() {
@@ -109,6 +135,29 @@ async function refreshTray() {
   tray.setContextMenu(await buildTrayMenu());
 }
 
+function configureDisplayMediaCapture() {
+  session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
+    try {
+      const sources = await desktopCapturer.getSources({
+        types: ["screen"],
+        thumbnailSize: { width: 1, height: 1 }
+      });
+      const primaryScreen = sources[0];
+      if (!primaryScreen) {
+        callback({});
+        return;
+      }
+
+      callback({
+        video: request.videoRequested ? primaryScreen : undefined,
+        audio: request.audioRequested && process.platform === "win32" ? "loopback" : undefined
+      });
+    } catch {
+      callback({});
+    }
+  }, { useSystemPicker: true });
+}
+
 function attachWindowGuards(window: BrowserWindow) {
   window.on("close", async (event) => {
     if (isQuitting) {
@@ -123,14 +172,16 @@ function attachWindowGuards(window: BrowserWindow) {
 }
 
 async function createMainWindow() {
+  const icon = createAppIcon();
   mainWindow = new BrowserWindow({
     width: 1120,
     height: 720,
-    minWidth: 1040,
-    minHeight: 660,
+    minWidth: 1120,
+    minHeight: 720,
     backgroundColor: "#f4f8ff",
     show: true,
     title: "DeskScribe",
+    icon,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(app.getAppPath(), "dist/preload/index.js"),
@@ -150,7 +201,7 @@ async function createMainWindow() {
 }
 
 async function createTray() {
-  tray = new Tray(createTrayImage());
+  tray = new Tray(createAppIcon());
   tray.setToolTip("DeskScribe");
   tray.on("click", () => {
     void showMainWindow();
@@ -174,6 +225,8 @@ app.on("activate", () => {
 });
 
 app.whenReady().then(async () => {
+  app.setAppUserModelId("com.deskscribe.app");
+  configureDisplayMediaCapture();
   registerIpc();
   await createMainWindow();
   await createTray();

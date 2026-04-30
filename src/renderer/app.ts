@@ -9,6 +9,12 @@ import type {
 } from "../shared/types";
 
 type RecorderState = "idle" | "recording" | "paused" | "processing";
+type RecordingAudioSource = "microphone" | "system" | "microphone-system";
+type EngineModelSelection = "whisper-cpp" | "distil-large-v3";
+
+const LIVE_TRANSCRIPTION_INTERVAL_MS = 8000;
+const LIVE_TRANSCRIPTION_MIN_SECONDS = 3;
+const LIVE_PCM_SAMPLE_RATE = 16000;
 
 const defaultPreferences: AppPreferences = {
   theme: "system",
@@ -18,7 +24,10 @@ const defaultPreferences: AppPreferences = {
   whisperExecutablePath: "",
   ffmpegExecutablePath: "",
   modelPath: "",
-  disableGpu: true
+  disableGpu: true,
+  transcriptionEngine: "whisper-cpp",
+  fasterWhisperModel: "distil-large-v3",
+  whisperThreads: 4
 };
 
 export function mountApp(root: HTMLDivElement) {
@@ -55,12 +64,39 @@ export function mountApp(root: HTMLDivElement) {
               <div id="elapsed" class="timer">00:00</div>
             </div>
 
-            <div class="button-row">
-              <button id="start-recording" class="primary-button icon-text-button" type="button"><i class="ri-record-circle-line" aria-hidden="true"></i><span>开始</span></button>
-              <button id="pause-recording" class="ghost-button icon-text-button" type="button" disabled><i class="ri-pause-line" aria-hidden="true"></i><span>暂停</span></button>
-              <button id="resume-recording" class="ghost-button icon-text-button" type="button" disabled><i class="ri-play-line" aria-hidden="true"></i><span>继续</span></button>
-              <button id="stop-recording" class="ghost-button icon-text-button" type="button" disabled><i class="ri-stop-line" aria-hidden="true"></i><span>停止</span></button>
-              <button id="export-recording" class="ghost-button icon-text-button" type="button" disabled><i class="ri-music-2-line" aria-hidden="true"></i><span>导出 MP3</span></button>
+            <div class="record-options">
+              <label class="field">
+                <span>录制来源</span>
+                <div id="recording-source-select" class="custom-select" data-value="microphone">
+                  <button class="select-button" type="button" aria-haspopup="listbox" aria-expanded="false">
+                    <span class="select-label">仅麦克风</span>
+                    <i class="ri-arrow-down-s-line" aria-hidden="true"></i>
+                  </button>
+                  <div class="select-menu" role="listbox" hidden>
+                    <button type="button" role="option" data-value="microphone">仅麦克风</button>
+                    <button type="button" role="option" data-value="system">仅系统声音</button>
+                    <button type="button" role="option" data-value="microphone-system">麦克风 + 系统声音</button>
+                  </div>
+                </div>
+              </label>
+
+              <label class="toggle-field">
+                <input id="live-transcription-checkbox" type="checkbox" />
+                <span>边录边转写预览</span>
+              </label>
+            </div>
+
+            <div class="recording-button-stack">
+              <div class="button-row record-transport-row">
+                <button id="start-recording" class="primary-button icon-text-button" type="button"><i class="ri-record-circle-line" aria-hidden="true"></i><span>开始</span></button>
+                <button id="pause-recording" class="ghost-button icon-text-button" type="button" disabled><i class="ri-pause-line" aria-hidden="true"></i><span>暂停</span></button>
+                <button id="resume-recording" class="ghost-button icon-text-button" type="button" disabled><i class="ri-play-line" aria-hidden="true"></i><span>继续</span></button>
+                <button id="stop-recording" class="ghost-button icon-text-button" type="button" disabled><i class="ri-stop-line" aria-hidden="true"></i><span>停止</span></button>
+              </div>
+              <div class="button-row record-output-row">
+                <button id="transcribe-recording" class="primary-button icon-text-button" type="button" disabled><i class="ri-magic-line" aria-hidden="true"></i><span>开始转写</span></button>
+                <button id="export-recording" class="ghost-button icon-text-button" type="button" disabled><i class="ri-music-2-line" aria-hidden="true"></i><span>导出 MP3</span></button>
+              </div>
             </div>
           </article>
 
@@ -195,27 +231,62 @@ export function mountApp(root: HTMLDivElement) {
               </div>
             </label>
 
+            <label class="field">
+              <span>转写引擎</span>
+              <div id="transcription-engine-select" class="custom-select" data-value="whisper-cpp">
+                <button class="select-button" type="button" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="select-label">Whisper.cpp 稳定</span>
+                  <i class="ri-arrow-down-s-line" aria-hidden="true"></i>
+                </button>
+                <div class="select-menu" role="listbox" hidden>
+                  <button type="button" role="option" data-value="whisper-cpp">Whisper.cpp 稳定</button>
+                  <button type="button" role="option" data-value="faster-whisper">Faster-Whisper 加速</button>
+                </div>
+              </div>
+            </label>
+
+            <label class="field">
+              <span>加速模型</span>
+              <div id="faster-model-select" class="custom-select" data-value="distil-large-v3">
+                <button class="select-button" type="button" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="select-label">distil-large-v3</span>
+                  <i class="ri-arrow-down-s-line" aria-hidden="true"></i>
+                </button>
+                <div class="select-menu" role="listbox" hidden>
+                  <button type="button" role="option" data-value="whisper-cpp">Whisper.cpp 模型</button>
+                  <button type="button" role="option" data-value="distil-large-v3">distil-large-v3 模型</button>
+                </div>
+              </div>
+            </label>
+
             <label class="field checkbox-field">
               <input id="disable-gpu-checkbox" type="checkbox" checked />
               <span>CPU 稳定模式（关闭后尝试 GPU）</span>
             </label>
+
+            <label class="field">
+              <span>Whisper 线程数（0 自动）</span>
+              <input id="whisper-threads-input" type="number" min="0" step="1" />
+            </label>
           </div>
 
           <div class="path-stack">
-            <div class="path-field">
+            <div class="path-field path-field-with-clear">
               <label class="field field-block">
                 <span>转写程序</span>
                 <input id="whisper-executable-input" type="text" readonly placeholder="默认使用内置 CPU 版；可选择 GPU 版 whisper-cli.exe" />
               </label>
               <button id="pick-whisper-executable" class="ghost-button icon-only-button" type="button" title="选择 whisper-cli" aria-label="选择 whisper-cli"><i class="ri-terminal-box-line" aria-hidden="true"></i></button>
+              <button id="clear-whisper-executable" class="ghost-button icon-only-button" type="button" title="清空并使用内置转写程序" aria-label="清空并使用内置转写程序"><i class="ri-close-circle-line" aria-hidden="true"></i></button>
             </div>
 
-            <div class="path-field">
+            <div class="path-field path-field-with-clear">
               <label class="field field-block">
                 <span>转写模型</span>
                 <input id="model-path-input" type="text" readonly placeholder="默认使用内置模型，可选择量化 large-v3 模型" />
               </label>
               <button id="pick-model-file" class="ghost-button icon-only-button" type="button" title="选择 Whisper 模型" aria-label="选择 Whisper 模型"><i class="ri-cpu-line" aria-hidden="true"></i></button>
+              <button id="clear-model-file" class="ghost-button icon-only-button" type="button" title="清空并使用内置模型" aria-label="清空并使用内置模型"><i class="ri-close-circle-line" aria-hidden="true"></i></button>
             </div>
 
             <div class="path-field">
@@ -245,10 +316,13 @@ export function mountApp(root: HTMLDivElement) {
     processProgress: root.querySelector<HTMLDivElement>("#process-progress")!,
     processMessage: root.querySelector<HTMLParagraphElement>("#process-message")!,
     processLog: root.querySelector<HTMLDivElement>("#process-log")!,
+    recordingSourceSelect: root.querySelector<HTMLElement>("#recording-source-select")!,
+    liveTranscriptionCheckbox: root.querySelector<HTMLInputElement>("#live-transcription-checkbox")!,
     startRecording: root.querySelector<HTMLButtonElement>("#start-recording")!,
     pauseRecording: root.querySelector<HTMLButtonElement>("#pause-recording")!,
     resumeRecording: root.querySelector<HTMLButtonElement>("#resume-recording")!,
     stopRecording: root.querySelector<HTMLButtonElement>("#stop-recording")!,
+    transcribeRecording: root.querySelector<HTMLButtonElement>("#transcribe-recording")!,
     exportRecording: root.querySelector<HTMLButtonElement>("#export-recording")!,
     chooseFile: root.querySelector<HTMLButtonElement>("#choose-file")!,
     transcribeFile: root.querySelector<HTMLButtonElement>("#transcribe-file")!,
@@ -260,11 +334,16 @@ export function mountApp(root: HTMLDivElement) {
     themeSelect: root.querySelector<HTMLElement>("#theme-select")!,
     closeBehaviorSelect: root.querySelector<HTMLElement>("#close-behavior-select")!,
     defaultLanguageSelect: root.querySelector<HTMLElement>("#default-language-select")!,
+    transcriptionEngineSelect: root.querySelector<HTMLElement>("#transcription-engine-select")!,
+    fasterModelSelect: root.querySelector<HTMLElement>("#faster-model-select")!,
     disableGpuCheckbox: root.querySelector<HTMLInputElement>("#disable-gpu-checkbox")!,
+    whisperThreadsInput: root.querySelector<HTMLInputElement>("#whisper-threads-input")!,
     whisperExecutableInput: root.querySelector<HTMLInputElement>("#whisper-executable-input")!,
     pickWhisperExecutable: root.querySelector<HTMLButtonElement>("#pick-whisper-executable")!,
+    clearWhisperExecutable: root.querySelector<HTMLButtonElement>("#clear-whisper-executable")!,
     modelPathInput: root.querySelector<HTMLInputElement>("#model-path-input")!,
     pickModelFile: root.querySelector<HTMLButtonElement>("#pick-model-file")!,
+    clearModelFile: root.querySelector<HTMLButtonElement>("#clear-model-file")!,
     exportDirectoryInput: root.querySelector<HTMLInputElement>("#export-directory-input")!,
     pickExportDirectory: root.querySelector<HTMLButtonElement>("#pick-export-directory")!
   };
@@ -274,11 +353,25 @@ export function mountApp(root: HTMLDivElement) {
   let selectedFilePath = "";
   let currentTranscript: TranscriptDocument | null = null;
   let activeStream: MediaStream | null = null;
+  let microphoneStream: MediaStream | null = null;
+  let systemAudioStream: MediaStream | null = null;
   let activeRecorder: MediaRecorder | null = null;
   let lastRecording: RecordingAudioExportRequest | null = null;
   let audioContext: AudioContext | null = null;
   let analyser: AnalyserNode | null = null;
+  let audioGraphNodes: AudioNode[] = [];
+  let livePcmProcessor: ScriptProcessorNode | null = null;
+  let liveSilentOutput: GainNode | null = null;
   let chunks: Blob[] = [];
+  let livePcmChunks: Int16Array[] = [];
+  let livePcmSampleCount = 0;
+  let liveLastFlushAt = 0;
+  let liveTranscriptionBusy = false;
+  let liveTranscriptionStopped = true;
+  let liveTranscriptionPending = false;
+  let isLiveTranscribing = false;
+  let liveLastSnapshotSize = 0;
+  let liveSegmentIndex = 0;
   let startedAt = 0;
   let pausedAt = 0;
   let pausedTotal = 0;
@@ -354,6 +447,14 @@ export function mountApp(root: HTMLDivElement) {
     return getCustomSelectValue<TranscriptLanguage>(refs.languageSelect);
   }
 
+  function currentRecordingSource(): RecordingAudioSource {
+    return getCustomSelectValue<RecordingAudioSource>(refs.recordingSourceSelect);
+  }
+
+  function liveTranscriptionRequested() {
+    return refs.liveTranscriptionCheckbox.checked;
+  }
+
   function updateElapsed(forceMs?: number) {
     const elapsedMs = forceMs ?? Math.max(0, Date.now() - startedAt - pausedTotal);
     const minutes = Math.floor(elapsedMs / 60000);
@@ -378,13 +479,13 @@ export function mountApp(root: HTMLDivElement) {
 
   function setStatus(text: string) {
     refs.processMessage.textContent = text;
-    if (!isTranscribing) {
+    if (!isTranscribing && !isLiveTranscribing) {
       refs.processPanel.dataset.stage = recorderState;
     }
   }
 
   function syncRecorderProcessState(next: RecorderState) {
-    if (isTranscribing) return;
+    if (isTranscribing || isLiveTranscribing) return;
     refs.processStage.textContent =
       next === "recording" ? "录音中" :
       next === "paused" ? "已暂停" :
@@ -405,19 +506,32 @@ export function mountApp(root: HTMLDivElement) {
     refs.pauseRecording.disabled = next !== "recording";
     refs.resumeRecording.disabled = next !== "paused";
     refs.stopRecording.disabled = next !== "recording" && next !== "paused";
+    refs.transcribeRecording.disabled = next !== "idle" || !lastRecording || liveTranscriptionBusy;
     refs.exportRecording.disabled = next !== "idle" || !lastRecording;
     refs.chooseFile.disabled = next !== "idle";
     refs.transcribeFile.disabled = next !== "idle" || !selectedFilePath;
+    refs.recordingSourceSelect.querySelector<HTMLButtonElement>(".select-button")!.disabled = next !== "idle";
+    refs.liveTranscriptionCheckbox.disabled = next !== "idle";
     syncRecorderProcessState(next);
+  }
+
+  function engineModelSelectionFromPreferences(): EngineModelSelection {
+    return preferences.transcriptionEngine === "faster-whisper" ? "distil-large-v3" : "whisper-cpp";
   }
 
   function syncPreferencesToUi() {
     setCustomSelectValue(refs.themeSelect, preferences.theme, true);
     setCustomSelectValue(refs.closeBehaviorSelect, preferences.closeBehavior, true);
     setCustomSelectValue(refs.defaultLanguageSelect, preferences.defaultLanguage, true);
+    setCustomSelectValue(refs.transcriptionEngineSelect, preferences.transcriptionEngine, true);
+    setCustomSelectValue(refs.fasterModelSelect, engineModelSelectionFromPreferences(), true);
     refs.disableGpuCheckbox.checked = preferences.disableGpu;
+    refs.whisperThreadsInput.max = String(Math.max(1, navigator.hardwareConcurrency || 4));
+    refs.whisperThreadsInput.value = String(Math.max(0, Math.min(preferences.whisperThreads || 0, Number(refs.whisperThreadsInput.max))));
     refs.whisperExecutableInput.value = preferences.whisperExecutablePath;
     refs.modelPathInput.value = preferences.modelPath;
+    refs.clearWhisperExecutable.disabled = !preferences.whisperExecutablePath;
+    refs.clearModelFile.disabled = !preferences.modelPath;
     refs.exportDirectoryInput.value = preferences.exportDirectory;
     setCustomSelectValue(refs.languageSelect, preferences.defaultLanguage, true);
     applyTheme(preferences.theme);
@@ -512,7 +626,7 @@ export function mountApp(root: HTMLDivElement) {
     refs.processProgress.style.width = `${Math.max(0, Math.min(100, percent))}%`;
     refs.processMessage.textContent = `${progress.message}${elapsedMs ? ` · ${formatDuration(elapsedMs)}` : ""}`;
     refs.processPanel.dataset.stage = progress.stage;
-    refs.cancelTranscription.disabled = progress.stage === "completed" || progress.stage === "failed" || progress.stage === "cancelled" || !isTranscribing;
+    refs.cancelTranscription.disabled = progress.stage === "completed" || progress.stage === "failed" || progress.stage === "cancelled" || (!isTranscribing && !isLiveTranscribing);
 
     if (progress.detail) {
       processLogLines = [progress.detail, ...processLogLines].slice(0, 80);
@@ -543,6 +657,179 @@ export function mountApp(root: HTMLDivElement) {
       setRecorderState("idle");
       updateElapsed(0);
     }
+  }
+
+  function recordingToTranscriptionRequest(recording: RecordingAudioExportRequest) {
+    return {
+      bytes: recording.bytes,
+      mimeType: recording.mimeType,
+      fileName: recording.fileName,
+      language: currentLanguage()
+    };
+  }
+
+  function resetLiveTranscription() {
+    livePcmChunks = [];
+    livePcmSampleCount = 0;
+    liveLastFlushAt = Date.now();
+    liveTranscriptionBusy = false;
+    liveTranscriptionStopped = !liveTranscriptionRequested();
+    liveTranscriptionPending = false;
+    isLiveTranscribing = false;
+    liveLastSnapshotSize = 0;
+    liveSegmentIndex = 0;
+  }
+
+  function downsampleToInt16(input: Float32Array, sourceRate: number, targetRate: number) {
+    if (sourceRate <= targetRate) {
+      const direct = new Int16Array(input.length);
+      for (let index = 0; index < input.length; index += 1) {
+        const sample = Math.max(-1, Math.min(1, input[index] || 0));
+        direct[index] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+      }
+      return direct;
+    }
+
+    const ratio = sourceRate / targetRate;
+    const outputLength = Math.max(1, Math.floor(input.length / ratio));
+    const output = new Int16Array(outputLength);
+    for (let index = 0; index < outputLength; index += 1) {
+      const start = Math.floor(index * ratio);
+      const end = Math.min(input.length, Math.floor((index + 1) * ratio));
+      let sum = 0;
+      for (let cursor = start; cursor < end; cursor += 1) {
+        sum += input[cursor] || 0;
+      }
+      const sample = Math.max(-1, Math.min(1, sum / Math.max(1, end - start)));
+      output[index] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+    }
+    return output;
+  }
+
+  function encodeLivePcmWav() {
+    const dataBytes = livePcmSampleCount * 2;
+    const bytes = new Uint8Array(44 + dataBytes);
+    const view = new DataView(bytes.buffer);
+    const writeAscii = (offset: number, value: string) => {
+      for (let index = 0; index < value.length; index += 1) {
+        view.setUint8(offset + index, value.charCodeAt(index));
+      }
+    };
+
+    writeAscii(0, "RIFF");
+    view.setUint32(4, 36 + dataBytes, true);
+    writeAscii(8, "WAVE");
+    writeAscii(12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, LIVE_PCM_SAMPLE_RATE, true);
+    view.setUint32(28, LIVE_PCM_SAMPLE_RATE * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeAscii(36, "data");
+    view.setUint32(40, dataBytes, true);
+
+    let offset = 44;
+    for (const chunk of livePcmChunks) {
+      for (let index = 0; index < chunk.length; index += 1) {
+        view.setInt16(offset, chunk[index] || 0, true);
+        offset += 2;
+      }
+    }
+    return bytes;
+  }
+
+  function startLivePcmCapture(mixer: AudioNode) {
+    if (!audioContext || !liveTranscriptionRequested()) return;
+    livePcmProcessor = audioContext.createScriptProcessor(4096, 2, 2);
+    liveSilentOutput = audioContext.createGain();
+    liveSilentOutput.gain.value = 0;
+    livePcmProcessor.onaudioprocess = (event) => {
+      if (liveTranscriptionStopped) return;
+      const inputBuffer = event.inputBuffer;
+      const channelCount = Math.max(1, inputBuffer.numberOfChannels);
+      const mono = new Float32Array(inputBuffer.length);
+      for (let channel = 0; channel < channelCount; channel += 1) {
+        const channelData = inputBuffer.getChannelData(channel);
+        for (let index = 0; index < channelData.length; index += 1) {
+          mono[index] += channelData[index] / channelCount;
+        }
+      }
+      const pcm = downsampleToInt16(mono, audioContext!.sampleRate, LIVE_PCM_SAMPLE_RATE);
+      livePcmChunks.push(pcm);
+      livePcmSampleCount += pcm.length;
+    };
+    mixer.connect(livePcmProcessor);
+    livePcmProcessor.connect(liveSilentOutput);
+    liveSilentOutput.connect(audioContext.destination);
+    audioGraphNodes.push(livePcmProcessor, liveSilentOutput);
+  }
+
+  function renderLiveTranscript(document: TranscriptDocument) {
+    const text = document.text.trim();
+    if (!text) return;
+    refs.transcriptText.value = text;
+    refs.transcriptText.scrollTop = refs.transcriptText.scrollHeight;
+  }
+
+  async function transcribeLiveSnapshot() {
+    if (!livePcmSampleCount || liveTranscriptionStopped) return;
+    liveTranscriptionBusy = true;
+    isLiveTranscribing = true;
+    setRecorderState(recorderState);
+    applyTranscriptionProgress({ stage: "queued", message: "实时转写预览已提交", progress: 5 });
+    refs.cancelTranscription.disabled = false;
+    try {
+      const bytes = encodeLivePcmWav();
+      if (bytes.byteLength < 4096) return;
+      const fileName = `live-recording-${String(++liveSegmentIndex).padStart(3, "0")}`;
+      const result = await window.deskScribe.transcribeRecording({
+        bytes,
+        mimeType: "audio/wav",
+        fileName,
+        language: currentLanguage()
+      });
+      renderLiveTranscript(result.document);
+      applyTranscriptionProgress({ stage: "completed", message: "实时转写预览已更新", progress: 100 });
+      setStatus(result.document.text.trim()
+        ? "实时转写预览已更新。停止录音后仍可点击“开始转写”生成完整结果。"
+        : "实时转写暂未识别到文本，会继续等待后续音频。");
+    } catch (error) {
+      const message = normalizeErrorMessage(error);
+      const cancelled = message === "已取消转写。";
+      applyTranscriptionProgress({
+        stage: cancelled ? "cancelled" : "failed",
+        message: cancelled ? "实时转写预览已取消，录音仍在继续。" : `实时转写预览失败：${message}`,
+        progress: 100
+      });
+      setStatus(cancelled ? "实时转写预览已取消，录音仍在继续。" : `实时转写预览失败：${message}`);
+    } finally {
+      liveTranscriptionBusy = false;
+      isLiveTranscribing = false;
+      refs.cancelTranscription.disabled = true;
+      setRecorderState(recorderState);
+      if (liveTranscriptionPending && !liveTranscriptionStopped) {
+        liveTranscriptionPending = false;
+        maybeFlushLiveTranscription(true);
+      }
+    }
+  }
+
+  function maybeFlushLiveTranscription(force = false) {
+    if (!liveTranscriptionRequested() || liveTranscriptionStopped) return;
+    const elapsed = Date.now() - liveLastFlushAt;
+    if (!force && elapsed < LIVE_TRANSCRIPTION_INTERVAL_MS) return;
+    if (liveTranscriptionBusy) {
+      liveTranscriptionPending = true;
+      return;
+    }
+    if (!livePcmSampleCount) return;
+    if (!force && livePcmSampleCount < LIVE_PCM_SAMPLE_RATE * LIVE_TRANSCRIPTION_MIN_SECONDS) return;
+    if (!force && livePcmSampleCount === liveLastSnapshotSize) return;
+    liveLastSnapshotSize = livePcmSampleCount;
+    liveLastFlushAt = Date.now();
+    void transcribeLiveSnapshot();
   }
 
   async function requestMicrophoneStream() {
@@ -594,8 +881,83 @@ export function mountApp(root: HTMLDivElement) {
     throw new Error("无法初始化麦克风，请检查系统录音设备和权限设置。");
   }
 
+  async function requestSystemAudioStream() {
+    if (!navigator.mediaDevices.getDisplayMedia) {
+      throw new Error("当前运行环境不支持系统声音录制。");
+    }
+
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+      video: true,
+      audio: true
+    });
+
+    if (stream.getAudioTracks().length === 0) {
+      stream.getTracks().forEach((track) => track.stop());
+      throw new Error("未获取到系统声音。请选择可共享音频的屏幕/窗口，并确认已启用系统音频。");
+    }
+
+    return stream;
+  }
+
+  async function createRecorderStream(sourceMode: RecordingAudioSource) {
+    microphoneStream = null;
+    systemAudioStream = null;
+
+    if (sourceMode === "microphone" || sourceMode === "microphone-system") {
+      microphoneStream = await requestMicrophoneStream();
+    }
+
+    if (sourceMode === "system" || sourceMode === "microphone-system") {
+      try {
+        systemAudioStream = await requestSystemAudioStream();
+      } catch (error) {
+        if (microphoneStream) {
+          microphoneStream.getTracks().forEach((track) => track.stop());
+          microphoneStream = null;
+        }
+        throw error;
+      }
+    }
+
+    audioContext = new AudioContext();
+    if (audioContext.state === "suspended") {
+      await audioContext.resume();
+    }
+    analyser = audioContext.createAnalyser();
+    analyser.fftSize = 256;
+
+    const destination = audioContext.createMediaStreamDestination();
+    const mixer = audioContext.createGain();
+    const connectInput = (stream: MediaStream) => {
+      const source = audioContext!.createMediaStreamSource(stream);
+      source.connect(mixer);
+      audioGraphNodes.push(source);
+    };
+
+    if (microphoneStream) {
+      connectInput(microphoneStream);
+    }
+    if (systemAudioStream) {
+      connectInput(systemAudioStream);
+    }
+
+    if (destination.stream.getAudioTracks().length === 0) {
+      throw new Error("未获取到可录制的音频来源。");
+    }
+
+    mixer.connect(destination);
+    mixer.connect(analyser);
+    audioGraphNodes.push(mixer, destination, analyser);
+    startLivePcmCapture(mixer);
+
+    return destination.stream;
+  }
+
   async function beginRecording() {
-    const stream = await requestMicrophoneStream();
+    const sourceMode = currentRecordingSource();
+    chunks = [];
+    resetLiveTranscription();
+    const stream = await createRecorderStream(sourceMode);
     const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
       ? "audio/webm;codecs=opus"
       : "audio/webm";
@@ -604,33 +966,33 @@ export function mountApp(root: HTMLDivElement) {
     activeRecorder = new MediaRecorder(stream, { mimeType });
     lastRecording = null;
     refs.exportRecording.disabled = true;
-    chunks = [];
-
-    audioContext = new AudioContext();
-    analyser = audioContext.createAnalyser();
-    analyser.fftSize = 256;
-    const source = audioContext.createMediaStreamSource(stream);
-    source.connect(analyser);
+    refs.transcribeRecording.disabled = true;
+    if (liveTranscriptionRequested()) {
+      renderTranscript(null);
+      refs.transcriptText.placeholder = "正在边录边转写，实时预览会分段追加在这里。";
+    }
 
     activeRecorder.ondataavailable = (event) => {
       if (event.data.size > 0) {
         chunks.push(event.data);
+        if (liveTranscriptionRequested() && !liveTranscriptionStopped) {
+          maybeFlushLiveTranscription();
+        }
       }
     };
 
     activeRecorder.onstop = async () => {
+      liveTranscriptionStopped = true;
       const blob = new Blob(chunks, { type: mimeType });
       const bytes = new Uint8Array(await blob.arrayBuffer());
       const fileName = `recording-${new Date().toISOString().replace(/[:.]/g, "-")}`;
       lastRecording = { bytes, mimeType, fileName };
-      await processResult(
-        window.deskScribe.transcribeRecording({
-          bytes,
-          mimeType,
-          fileName,
-          language: currentLanguage()
-        })
-      );
+      cleanupAudio();
+      setRecorderState("idle");
+      refs.transcriptText.placeholder = "录音或导入音频后，文本会显示在这里。";
+      setStatus(liveTranscriptionRequested()
+        ? "录音已保存，实时预览已停止。可以导出 MP3，或点击“开始转写”生成完整转写结果。"
+        : "录音已保存。可以导出 MP3，或点击“开始转写”进行识别。");
     };
 
     startedAt = Date.now();
@@ -638,7 +1000,11 @@ export function mountApp(root: HTMLDivElement) {
     pausedTotal = 0;
     updateElapsed(0);
     setRecorderState("recording");
-    setStatus("录音进行中。切换到其他程序时，录音会继续保持。");
+    setStatus(sourceMode === "microphone-system"
+      ? "正在录制麦克风和系统声音。请保持系统音频共享窗口处于有效状态。"
+      : sourceMode === "system"
+        ? "正在录制系统声音。请保持系统音频共享窗口处于有效状态。"
+        : "录音进行中。切换到其他程序时，录音会继续保持。");
     activeRecorder.start(1000);
   }
 
@@ -667,16 +1033,40 @@ export function mountApp(root: HTMLDivElement) {
       pausedTotal += Date.now() - pausedAt;
       pausedAt = 0;
     }
-    setStatus("正在整理音频并提交转写。");
+    setStatus("正在整理录音文件。");
     setRecorderState("processing");
+    if (liveTranscriptionRequested()) {
+      maybeFlushLiveTranscription(true);
+    }
     activeRecorder.stop();
   }
 
   function cleanupAudio() {
     activeRecorder = null;
+    if (livePcmProcessor) {
+      livePcmProcessor.onaudioprocess = null;
+      livePcmProcessor = null;
+    }
+    for (const node of audioGraphNodes) {
+      try {
+        node.disconnect();
+      } catch {
+        // Some nodes may already be disconnected when a capture permission flow fails.
+      }
+    }
+    audioGraphNodes = [];
+    liveSilentOutput = null;
     if (activeStream) {
       activeStream.getTracks().forEach((track) => track.stop());
       activeStream = null;
+    }
+    if (microphoneStream) {
+      microphoneStream.getTracks().forEach((track) => track.stop());
+      microphoneStream = null;
+    }
+    if (systemAudioStream) {
+      systemAudioStream.getTracks().forEach((track) => track.stop());
+      systemAudioStream = null;
     }
     if (audioContext) {
       void audioContext.close();
@@ -684,6 +1074,8 @@ export function mountApp(root: HTMLDivElement) {
     }
     analyser = null;
     chunks = [];
+    livePcmChunks = [];
+    livePcmSampleCount = 0;
   }
 
   async function pickAudioFile() {
@@ -696,6 +1088,11 @@ export function mountApp(root: HTMLDivElement) {
   async function transcribeSelectedFile() {
     if (!selectedFilePath) return;
     await processResult(window.deskScribe.transcribeFile(selectedFilePath, currentLanguage()));
+  }
+
+  async function transcribeLastRecording() {
+    if (!lastRecording) return;
+    await processResult(window.deskScribe.transcribeRecording(recordingToTranscriptionRequest(lastRecording)));
   }
 
   async function exportCurrentTranscript(format: ExportFormat) {
@@ -742,7 +1139,15 @@ export function mountApp(root: HTMLDivElement) {
     await persistPreferences();
   }
 
-  [refs.languageSelect, refs.themeSelect, refs.closeBehaviorSelect, refs.defaultLanguageSelect].forEach(bindCustomSelect);
+  [
+    refs.languageSelect,
+    refs.themeSelect,
+    refs.closeBehaviorSelect,
+    refs.defaultLanguageSelect,
+    refs.transcriptionEngineSelect,
+    refs.fasterModelSelect,
+    refs.recordingSourceSelect
+  ].forEach(bindCustomSelect);
 
   document.addEventListener("click", (event) => {
     if (!(event.target instanceof Node)) return;
@@ -755,16 +1160,8 @@ export function mountApp(root: HTMLDivElement) {
 
   refs.settingsToggle.addEventListener("click", () => openSettings(true));
   refs.closeSettings.addEventListener("click", () => openSettings(false));
-  refs.settingsPanel.addEventListener("click", (event) => {
-    if (event.target === refs.settingsPanel) {
-      openSettings(false);
-    }
-  });
 
   window.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && !refs.settingsPanel.hidden) {
-      openSettings(false);
-    }
     if (event.key === "Escape") {
       closeCustomSelects();
     }
@@ -776,9 +1173,18 @@ export function mountApp(root: HTMLDivElement) {
   refs.pauseRecording.addEventListener("click", pauseRecording);
   refs.resumeRecording.addEventListener("click", resumeRecording);
   refs.stopRecording.addEventListener("click", stopRecording);
+  refs.transcribeRecording.addEventListener("click", () => {
+    void transcribeLastRecording();
+  });
   refs.cancelTranscription.addEventListener("click", () => {
     refs.cancelTranscription.disabled = true;
-    setStatus("正在取消转写。");
+    if (isLiveTranscribing) {
+      liveTranscriptionStopped = true;
+      liveTranscriptionPending = false;
+      setStatus("正在取消实时转写预览，录音会继续。");
+    } else {
+      setStatus("正在取消转写。");
+    }
     void window.deskScribe.cancelTranscription();
   });
   refs.exportRecording.addEventListener("click", () => {
@@ -808,8 +1214,36 @@ export function mountApp(root: HTMLDivElement) {
     preferences.defaultLanguage = getCustomSelectValue<TranscriptLanguage>(refs.defaultLanguageSelect);
     await persistPreferences();
   });
+  onCustomSelectChange(refs.transcriptionEngineSelect, async () => {
+    preferences.transcriptionEngine = getCustomSelectValue<AppPreferences["transcriptionEngine"]>(refs.transcriptionEngineSelect);
+    if (preferences.transcriptionEngine === "faster-whisper") {
+      preferences.fasterWhisperModel = "distil-large-v3";
+      setStatus("已切换到 Faster-Whisper 加速引擎，并使用内置 distil-large-v3 模型。");
+    } else {
+      setStatus("已切换到 Whisper.cpp 稳定引擎；未选择本地模型时会使用内置 small 模型。");
+    }
+    await persistPreferences();
+  });
+  onCustomSelectChange(refs.fasterModelSelect, async () => {
+    const selectedModel = getCustomSelectValue<EngineModelSelection>(refs.fasterModelSelect);
+    if (selectedModel === "whisper-cpp") {
+      preferences.transcriptionEngine = "whisper-cpp";
+      setStatus("已切换到 Whisper.cpp 稳定引擎；未选择本地模型时会使用内置 small 模型。");
+    } else {
+      preferences.transcriptionEngine = "faster-whisper";
+      preferences.fasterWhisperModel = selectedModel;
+      setStatus("已切换到 Faster-Whisper 加速引擎，并使用内置 distil-large-v3 模型。");
+    }
+    await persistPreferences();
+  });
   refs.disableGpuCheckbox.addEventListener("change", async () => {
     preferences.disableGpu = refs.disableGpuCheckbox.checked;
+    await persistPreferences();
+  });
+  refs.whisperThreadsInput.addEventListener("change", async () => {
+    const maxThreads = Math.max(1, Number(refs.whisperThreadsInput.max || navigator.hardwareConcurrency || 4));
+    const next = Math.floor(Number(refs.whisperThreadsInput.value || 0));
+    preferences.whisperThreads = Math.max(0, Math.min(next, maxThreads));
     await persistPreferences();
   });
 
@@ -817,6 +1251,14 @@ export function mountApp(root: HTMLDivElement) {
     void bindPicker(window.deskScribe.selectWhisperExecutable, (value) => {
       preferences.whisperExecutablePath = value;
     });
+  });
+
+  refs.clearWhisperExecutable.addEventListener("click", () => {
+    void (async () => {
+      preferences.whisperExecutablePath = "";
+      await persistPreferences();
+      setStatus("已清空本地转写程序，将使用内置程序。");
+    })();
   });
 
   refs.pickExportDirectory.addEventListener("click", () => {
@@ -828,6 +1270,14 @@ export function mountApp(root: HTMLDivElement) {
     void bindPicker(window.deskScribe.selectModelFile, (value) => {
       preferences.modelPath = value;
     });
+  });
+
+  refs.clearModelFile.addEventListener("click", () => {
+    void (async () => {
+      preferences.modelPath = "";
+      await persistPreferences();
+      setStatus("已清空本地模型，将使用当前引擎对应的内置模型。");
+    })();
   });
   void window.deskScribe.getPreferences().then((loaded) => {
     preferences = loaded;

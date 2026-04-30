@@ -14,7 +14,10 @@ export function getDefaultPreferences(): AppPreferences {
     whisperExecutablePath: "",
     ffmpegExecutablePath: "",
     modelPath: "",
-    disableGpu: true
+    disableGpu: true,
+    transcriptionEngine: "whisper-cpp",
+    fasterWhisperModel: "distil-large-v3",
+    whisperThreads: 4
   };
 }
 

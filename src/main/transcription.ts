@@ -1,7 +1,9 @@
 import { app } from "electron";
 import { ChildProcess, spawn } from "node:child_process";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
+import * as OpenCC from "opencc-js";
 import {
   ensureDir,
   fileNameFromMime,
@@ -33,6 +35,9 @@ const WHISPER_SAFE_CHUNK_SECONDS = 60;
 const WHISPER_BALANCED_CHUNK_SECONDS = 180;
 const WHISPER_QUANTIZED_CHUNK_SECONDS = 600;
 const WHISPER_GPU_CHUNK_SECONDS = 900;
+const WHISPER_MAX_AUTO_THREADS = 12;
+const BUNDLED_FASTER_WHISPER_MODEL = "distil-large-v3";
+const traditionalToSimplified = OpenCC.Converter({ from: "t", to: "cn" });
 
 export class TranscriptionCancelledError extends Error {
   constructor() {
@@ -199,6 +204,26 @@ function fallbackChunkSeconds(currentSeconds: number) {
   return 0;
 }
 
+function whisperThreadCount(preferences: AppPreferences) {
+  const configuredThreads = Math.floor(Number(preferences.whisperThreads || 0));
+  const maxThreads = Math.max(1, os.cpus().length || 4);
+  if (configuredThreads > 0) {
+    return Math.max(1, Math.min(configuredThreads, maxThreads));
+  }
+
+  const envValue = Number(process.env.DESKSCRIBE_WHISPER_THREADS || 0);
+  if (Number.isFinite(envValue) && envValue >= 1) {
+    return Math.max(1, Math.min(Math.floor(envValue), maxThreads));
+  }
+
+  const logicalCores = maxThreads;
+  if (logicalCores <= 4) {
+    return Math.max(2, logicalCores - 1);
+  }
+
+  return Math.max(4, Math.min(WHISPER_MAX_AUTO_THREADS, logicalCores - 2));
+}
+
 function executableName(baseName: string) {
   return process.platform === "win32" ? `${baseName}.exe` : baseName;
 }
@@ -224,11 +249,45 @@ function ffmpegCandidates(preferences?: AppPreferences) {
   ]);
 }
 
+function fasterWhisperRunnerCandidates() {
+  return uniquePaths([
+    ...resourcePathCandidates("scripts", "faster-whisper-runner.py"),
+    path.join(app.getAppPath(), "resources", "scripts", "faster-whisper-runner.py"),
+    path.join(process.cwd(), "resources", "scripts", "faster-whisper-runner.py")
+  ]);
+}
+
+function pythonCandidates() {
+  const windowsPython = process.platform === "win32" ? "python.exe" : "python";
+  const scriptsDir = process.platform === "win32" ? "Scripts" : "bin";
+  return uniquePaths([
+    ...resourcePathCandidates("python", scriptsDir, windowsPython),
+    ...resourcePathCandidates("python", windowsPython),
+    ...(process.platform === "win32" ? ["python.exe", "python"] : ["python3", "python"])
+  ]);
+}
+
+async function findBundledFasterWhisperModelDir() {
+  for (const candidate of resourcePathCandidates("models", "faster-whisper")) {
+    if (await exists(candidate)) {
+      return candidate;
+    }
+  }
+  return "";
+}
+
 function pushLog(logs: string[], line: string) {
+  if (isSuppressedRuntimeLog(line)) {
+    return;
+  }
   logs.push(line);
   if (logs.length > 160) {
     logs.splice(0, logs.length - 160);
   }
+}
+
+function isSuppressedRuntimeLog(line: string) {
+  return /You are sending unauthenticated requests to the HF Hub/i.test(line);
 }
 
 function parseCliPercent(line: string) {
@@ -259,6 +318,12 @@ async function runCandidate(
     let lastOutputAt = 0;
     const child = spawn(executable, args, {
       cwd: path.dirname(executable),
+      env: {
+        ...process.env,
+        HF_HUB_DISABLE_PROGRESS_BARS: "1",
+        HF_HUB_DISABLE_TELEMETRY: "1",
+        HF_HUB_DISABLE_XET: "1"
+      },
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"]
     });
@@ -303,6 +368,7 @@ async function runCandidate(
     const collectOutput = (chunk: Buffer) => {
       const line = String(chunk).trim();
       if (!line) return;
+      if (isSuppressedRuntimeLog(line)) return;
       pushLog(logs, line);
       const now = Date.now();
       const cliPercent = stage === "transcribing" ? parseCliPercent(line) : undefined;
@@ -527,7 +593,7 @@ export async function exportRecordingAudio(input: RecordingAudioExportRequest, o
 
 function languagePrompt(language: TranscriptLanguage) {
   if (language === "zh") {
-    return "以下是清晰的中文普通话语音转写文本。请保留自然标点，避免添加不存在的内容。";
+    return "以下是清晰的中文普通话语音转写文本。请使用简体中文，保留自然标点，避免添加不存在的内容。";
   }
   if (language === "en") {
     return "This is a clear English speech transcription. Keep natural punctuation and do not add content that was not spoken.";
@@ -536,7 +602,7 @@ function languagePrompt(language: TranscriptLanguage) {
 }
 
 function normalizeSegmentText(text: string) {
-  return text.replace(/\s+\n/g, "\n").trim();
+  return traditionalToSimplified(text.replace(/\s+\n/g, "\n").trim());
 }
 
 function isKnownNonSpeechHallucination(text: string) {
@@ -586,6 +652,51 @@ function parseWhisperOutput(
   };
 }
 
+function parseTranscriptJsonOutput(
+  raw: string,
+  sourceType: "recording" | "file",
+  fileName: string,
+  requestedLanguage: TranscriptLanguage,
+  modelName: string
+): TranscriptDocument {
+  const parsed = JSON.parse(raw) as {
+    engine?: TranscriptDocument["engine"];
+    detectedLanguage?: string;
+    segments?: Array<{
+      startMs?: number;
+      endMs?: number;
+      text?: string;
+    }>;
+    text?: string;
+  };
+  const segments: TranscriptSegment[] = (parsed.segments || [])
+    .map((segment, index) => ({
+      id: index + 1,
+      startMs: Math.max(0, Number(segment.startMs || 0)),
+      endMs: Math.max(0, Number(segment.endMs || 0)),
+      text: normalizeSegmentText(segment.text || "")
+    }))
+    .filter((segment) => segment.text.length > 0 && !isKnownNonSpeechHallucination(segment.text));
+
+  return {
+    version: 1,
+    source: {
+      type: sourceType,
+      fileName,
+      durationMs: segments.length > 0 ? segments[segments.length - 1].endMs : undefined,
+      language: requestedLanguage
+    },
+    text: segments.map((segment) => segment.text).join("\n"),
+    segments,
+    createdAt: new Date().toISOString(),
+    engine: parsed.engine || {
+      name: "faster-whisper",
+      model: modelName,
+      detectedLanguage: parsed.detectedLanguage
+    }
+  };
+}
+
 function isLikelyEmptyAudioWhisperFailure(error: unknown, chunkLogs: string[]) {
   const message = error instanceof Error ? error.message : String(error);
   const joinedLogs = chunkLogs.join("\n");
@@ -607,6 +718,7 @@ function buildWhisperArgs(
   preferences: AppPreferences,
   compatibilityMode = false
 ) {
+  const threads = whisperThreadCount(preferences);
   const args = [
     "-m",
     modelPath,
@@ -618,7 +730,7 @@ function buildWhisperArgs(
     "-l",
     language,
     "-t",
-    "2",
+    String(threads),
     "-p",
     "1",
     "-bs",
@@ -824,6 +936,130 @@ function mergeTranscriptDocuments(
   };
 }
 
+async function findFasterWhisperRunner() {
+  for (const candidate of fasterWhisperRunnerCandidates()) {
+    if (await exists(candidate)) {
+      return candidate;
+    }
+  }
+  return "";
+}
+
+async function runFasterWhisper(
+  normalizedPath: string,
+  tempDir: string,
+  preferences: AppPreferences,
+  language: TranscriptLanguage,
+  logs: string[],
+  sourceType: "recording" | "file",
+  fileName: string,
+  report?: ProgressReporter,
+  controller?: TranscriptionController
+) {
+  const runnerPath = await findFasterWhisperRunner();
+  if (!runnerPath) {
+    throw new Error("Unable to locate Faster-Whisper runner.");
+  }
+
+  report?.({ stage: "transcribing", message: "正在启动 Faster-Whisper 加速引擎", progress: 56 });
+  const outputPath = path.join(tempDir, "transcript-faster-whisper.json");
+  const modelDir = await findBundledFasterWhisperModelDir();
+  if (!modelDir) {
+    throw new Error("Unable to locate bundled Faster-Whisper models. Reinstall DeskScribe with resources/models/faster-whisper.");
+  }
+  const device = preferences.disableGpu ? "cpu" : "auto";
+  const computeType = preferences.disableGpu ? "int8" : "auto";
+  const args = [
+    runnerPath,
+    "--audio",
+    normalizedPath,
+    "--output",
+    outputPath,
+    "--model",
+    BUNDLED_FASTER_WHISPER_MODEL,
+    "--language",
+    language,
+    "--device",
+    device,
+    "--compute-type",
+    computeType,
+    "--model-dir",
+    modelDir
+  ];
+
+  const executable = await runWithCandidates(
+    pythonCandidates(),
+    args,
+    logs,
+    "Unable to run Python. Install Python 3.9+ and faster-whisper, or switch back to Whisper.cpp.",
+    "transcribing",
+    WHISPER_TIMEOUT_MS,
+    report,
+    controller,
+    {
+      base: 56,
+      span: 32,
+      message: "正在使用 Faster-Whisper 识别语音内容"
+    }
+  );
+  const raw = await fs.readFile(outputPath, "utf8");
+  const document = parseTranscriptJsonOutput(raw, sourceType, fileName, language, BUNDLED_FASTER_WHISPER_MODEL);
+  if (!document.text.trim()) {
+    throw new Error("Faster-Whisper completed but returned empty text. DeskScribe will try the fallback engine when available.");
+  }
+  pushLog(logs, `Transcribed with faster-whisper via ${path.basename(executable)}`);
+  return { document, outputPath };
+}
+
+async function runTranscriptionEngine(
+  normalizedPath: string,
+  tempDir: string,
+  preferences: AppPreferences,
+  language: TranscriptLanguage,
+  logs: string[],
+  sourceType: "recording" | "file",
+  fileName: string,
+  report?: ProgressReporter,
+  controller?: TranscriptionController
+) {
+  if (preferences.transcriptionEngine === "faster-whisper") {
+    try {
+      return await runFasterWhisper(
+        normalizedPath,
+        tempDir,
+        preferences,
+        language,
+        logs,
+        sourceType,
+        fileName,
+        report,
+        controller
+      );
+    } catch (error) {
+      if (isTranscriptionCancelled(error)) {
+        throw error;
+      }
+      pushLog(
+        logs,
+        `Faster-Whisper failed; falling back to Whisper.cpp -> ${error instanceof Error ? error.message : String(error)}`
+      );
+      report?.({ stage: "transcribing", message: "Faster-Whisper 不可用，正在回退到 Whisper.cpp", progress: 55 });
+    }
+  }
+
+  return runWhisper(
+    normalizedPath,
+    tempDir,
+    preferences,
+    language,
+    logs,
+    sourceType,
+    fileName,
+    report,
+    controller
+  );
+}
+
 async function runWhisper(
   normalizedPath: string,
   tempDir: string,
@@ -850,6 +1086,7 @@ async function runWhisper(
       ? "Using whisper-cli in CPU stable mode."
       : "GPU mode requested; DeskScribe will not pass --no-gpu. Use a GPU-enabled whisper-cli build for hardware acceleration."
   );
+  pushLog(logs, `Using ${whisperThreadCount(preferences)} whisper thread(s). Set threads to 0 for automatic allocation.`);
   await warnIfHighMemoryModel(modelPath, logs);
   const chunkSeconds = await chooseWhisperChunkSeconds(modelPath, preferences, logs);
   const chunkMs = chunkSeconds * 1000;
@@ -907,7 +1144,7 @@ export async function transcribeRecording(input: RecordingTranscriptionRequest, 
   report?.({ stage: "queued", message: "正在准备录音数据", progress: 5 });
   const { sourcePath, tempDir, safeName } = await writeRecordingInput(input);
   const normalizedPath = await normalizeAudio(sourcePath, tempDir, preferences, logs, report, controller);
-  const { document, outputPath } = await runWhisper(
+  const { document, outputPath } = await runTranscriptionEngine(
     normalizedPath,
     tempDir,
     preferences,
@@ -928,7 +1165,7 @@ export async function transcribeFile(filePath: string, language: TranscriptLangu
   const tempDir = path.join(app.getPath("temp"), "deskscribe", uniqueId("file"));
   await ensureDir(tempDir);
   const normalizedPath = await normalizeAudio(filePath, tempDir, preferences, logs, report, controller);
-  const { document, outputPath } = await runWhisper(
+  const { document, outputPath } = await runTranscriptionEngine(
     normalizedPath,
     tempDir,
     preferences,
