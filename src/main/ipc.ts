@@ -19,6 +19,10 @@ import type {
   TranscriptionProgressEvent
 } from "../shared/types";
 
+interface IpcHandlers {
+  onPreferencesSaved?: (preferences: AppPreferences) => void | Promise<void>;
+}
+
 function audioFilters() {
   return [{ name: "Audio", extensions: ["mp3", "wav", "m4a", "aac", "ogg", "flac", "webm"] }];
 }
@@ -39,11 +43,13 @@ function createController() {
   return activeTranscription;
 }
 
-export function registerIpc() {
+export function registerIpc(handlers: IpcHandlers = {}) {
   ipcMain.handle("preferences:get", async () => loadPreferences());
 
   ipcMain.handle("preferences:save", async (_event, next: AppPreferences) => {
-    return savePreferences(next);
+    const saved = await savePreferences(next);
+    await handlers.onPreferencesSaved?.(saved);
+    return saved;
   });
 
   ipcMain.handle("dialog:audio-file", async () => {

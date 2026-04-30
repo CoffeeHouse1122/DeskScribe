@@ -11,14 +11,20 @@ import fs from "node:fs";
 import path from "node:path";
 import { registerIpc } from "./ipc";
 import { loadPreferences } from "./preferences";
+import type { AppPreferences, CloseBehavior } from "../shared/types";
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
+let closeBehavior: CloseBehavior = "tray";
 
 const singleInstance = app.requestSingleInstanceLock();
 if (!singleInstance) {
   app.quit();
+}
+
+function applyMainProcessPreferences(preferences: AppPreferences) {
+  closeBehavior = preferences.closeBehavior;
 }
 
 function rendererUrl() {
@@ -106,8 +112,7 @@ async function showMainWindow() {
   mainWindow.focus();
 }
 
-async function buildTrayMenu() {
-  const preferences = await loadPreferences();
+function buildTrayMenu() {
   return Menu.buildFromTemplate([
     {
       label: "Open DeskScribe",
@@ -116,7 +121,7 @@ async function buildTrayMenu() {
       }
     },
     {
-      label: preferences.closeBehavior === "tray" ? "Hide to Tray Enabled" : "Quit on Close Enabled",
+      label: closeBehavior === "tray" ? "Hide to Tray Enabled" : "Quit on Close Enabled",
       enabled: false
     },
     { type: "separator" },
@@ -130,9 +135,9 @@ async function buildTrayMenu() {
   ]);
 }
 
-async function refreshTray() {
+function refreshTray() {
   if (!tray) return;
-  tray.setContextMenu(await buildTrayMenu());
+  tray.setContextMenu(buildTrayMenu());
 }
 
 function configureDisplayMediaCapture() {
@@ -159,12 +164,11 @@ function configureDisplayMediaCapture() {
 }
 
 function attachWindowGuards(window: BrowserWindow) {
-  window.on("close", async (event) => {
+  window.on("close", (event) => {
     if (isQuitting) {
       return;
     }
-    const preferences = await loadPreferences();
-    if (preferences.closeBehavior === "tray") {
+    if (closeBehavior === "tray") {
       event.preventDefault();
       window.hide();
     }
@@ -209,25 +213,33 @@ async function createTray() {
   tray.on("double-click", () => {
     void showMainWindow();
   });
-  await refreshTray();
+  refreshTray();
 }
 
-app.on("second-instance", () => {
-  void showMainWindow();
-});
+if (singleInstance) {
+  app.on("second-instance", () => {
+    void showMainWindow();
+  });
 
-app.on("before-quit", () => {
-  isQuitting = true;
-});
+  app.on("before-quit", () => {
+    isQuitting = true;
+  });
 
-app.on("activate", () => {
-  void showMainWindow();
-});
+  app.on("activate", () => {
+    void showMainWindow();
+  });
 
-app.whenReady().then(async () => {
-  app.setAppUserModelId("com.deskscribe.app");
-  configureDisplayMediaCapture();
-  registerIpc();
-  await createMainWindow();
-  await createTray();
-});
+  app.whenReady().then(async () => {
+    app.setAppUserModelId("com.deskscribe.app");
+    applyMainProcessPreferences(await loadPreferences());
+    configureDisplayMediaCapture();
+    registerIpc({
+      onPreferencesSaved: async (preferences) => {
+        applyMainProcessPreferences(preferences);
+        refreshTray();
+      }
+    });
+    await createMainWindow();
+    await createTray();
+  });
+}
