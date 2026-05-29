@@ -8,6 +8,6 @@ resources/models/*.bin
 # !resources/models/ggml-small.bin
 resources/models/*.gguf
 resources/models/faster-whisper/**/.cache/
-resources/models/faster-whisper/**/model.bin
+resources/models/faster-whisper/distil-large-v3/model.bin
 *.log
 tmp-*/
