@@ -5,8 +5,9 @@ release/
 resources/bin/Release/
 resources/python/
 resources/models/*.bin
-!resources/models/ggml-small.bin
+# !resources/models/ggml-small.bin
 resources/models/*.gguf
 resources/models/faster-whisper/**/.cache/
+resources/models/faster-whisper/**/ggml-*.bin
 *.log
 tmp-*/
