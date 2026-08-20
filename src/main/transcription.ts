@@ -15,6 +15,10 @@ import {
   resolveManagedModelPath,
   whisperCppManagedModelId
 } from "./model-manager";
+import {
+  advanceTranscriptionProgress,
+  fasterWhisperSupportsLanguage
+} from "./transcription-policy";
 import type {
   AppPreferences,
   ExportFormat,
@@ -38,6 +42,7 @@ const FFMPEG_TIMEOUT_MS = 20 * 60 * 1000;
 const WHISPER_TIMEOUT_MS = 3 * 60 * 60 * 1000;
 const FASTER_WORKER_START_TIMEOUT_MS = 3 * 60 * 1000;
 const FASTER_WORKER_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+const FASTER_WHISPER_CHUNK_SECONDS = 10 * 60;
 const WHISPER_SAFE_CHUNK_SECONDS = 60;
 const WHISPER_BALANCED_CHUNK_SECONDS = 180;
 const WHISPER_QUANTIZED_CHUNK_SECONDS = 600;
@@ -311,6 +316,11 @@ async function runCandidate(
     const startedAt = Date.now();
     let settled = false;
     let lastOutputAt = 0;
+    let lastProgress = progressWindow
+      ? progressWindow.base
+      : stage === "normalizing"
+        ? 18
+        : 0;
     const child = spawn(executable, args, {
       cwd: path.dirname(executable),
       env: {
@@ -328,7 +338,7 @@ async function runCandidate(
     report?.({
       stage,
       message: `正在执行 ${executableName}`,
-      progress: stage === "normalizing" ? 18 : 58,
+      progress: Math.round(lastProgress),
       elapsedMs: 0
     });
 
@@ -346,7 +356,7 @@ async function runCandidate(
       report?.({
         stage,
         message: progressWindow?.message || (stage === "normalizing" ? "正在转换音频格式" : "正在识别语音内容"),
-        progress: stage === "normalizing" ? 32 : progressWindow ? Math.round(progressWindow.base) : undefined,
+        progress: Math.round(lastProgress),
         elapsedMs
       });
     }, 5000);
@@ -367,15 +377,19 @@ async function runCandidate(
       pushLog(logs, line);
       const now = Date.now();
       const cliPercent = stage === "transcribing" ? parseCliPercent(line) : undefined;
+      const nextProgress = cliPercent !== undefined && progressWindow
+        ? progressWindow.base + (cliPercent / 100) * progressWindow.span
+        : stage === "normalizing"
+          ? 42
+          : undefined;
+      lastProgress = advanceTranscriptionProgress(lastProgress, nextProgress);
       if (now - lastOutputAt > 900) {
         lastOutputAt = now;
         report?.({
           stage,
           message: progressWindow?.message || (stage === "normalizing" ? "正在转换音频格式" : "正在识别语音内容"),
           detail: line.slice(0, 240),
-          progress: cliPercent !== undefined && progressWindow
-            ? Math.round(progressWindow.base + (cliPercent / 100) * progressWindow.span)
-            : stage === "normalizing" ? 42 : undefined,
+          progress: Math.round(lastProgress),
           elapsedMs: now - startedAt
         });
       }
@@ -479,6 +493,7 @@ type FasterWorkerPending = {
   controller?: TranscriptionController;
   report?: ProgressReporter;
   progressWindow: CommandProgressWindow;
+  lastProgress: number;
   resolve: (result: FasterWhisperRawResult) => void;
   reject: (error: Error) => void;
   heartbeatTimer: NodeJS.Timeout;
@@ -578,10 +593,14 @@ class FasterWhisperWorker {
     if (!pending || event.id !== pending.id) return;
     if (event.type === "progress") {
       const percent = Math.max(0, Math.min(100, Number(event.progress || 0)));
+      pending.lastProgress = advanceTranscriptionProgress(
+        pending.lastProgress,
+        pending.progressWindow.base + (percent / 100) * pending.progressWindow.span
+      );
       pending.report?.({
         stage: "transcribing",
         message: pending.progressWindow.message,
-        progress: Math.round(pending.progressWindow.base + (percent / 100) * pending.progressWindow.span),
+        progress: Math.round(pending.lastProgress),
         elapsedMs: Date.now() - pending.startedAt
       });
       return;
@@ -739,10 +758,11 @@ class FasterWhisperWorker {
     const startedAt = Date.now();
     const result = await new Promise<FasterWhisperRawResult>((resolve, reject) => {
       const heartbeatTimer = setInterval(() => {
+        const pending = this.pending;
         report?.({
           stage: "transcribing",
-          message: progressWindow.message,
-          progress: Math.round(progressWindow.base),
+          message: `${progressWindow.message}（模型仍在计算，长录音可能需要数分钟）`,
+          progress: Math.round(pending?.lastProgress ?? progressWindow.base),
           elapsedMs: Date.now() - startedAt
         });
       }, 5000);
@@ -756,6 +776,7 @@ class FasterWhisperWorker {
         controller,
         report,
         progressWindow,
+        lastProgress: progressWindow.base,
         resolve,
         reject,
         heartbeatTimer,
@@ -843,7 +864,8 @@ async function splitAudioFile(
   chunkSeconds: number,
   logs: string[],
   report?: ProgressReporter,
-  controller?: TranscriptionController
+  controller?: TranscriptionController,
+  progressWindow?: CommandProgressWindow
 ) {
   if (controller?.cancelled) {
     throw new TranscriptionCancelledError();
@@ -873,7 +895,8 @@ async function splitAudioFile(
     "normalizing",
     FFMPEG_TIMEOUT_MS,
     report,
-    controller
+    controller,
+    progressWindow
   );
   const chunkPaths = (await fs.readdir(chunksDir))
     .filter((name) => new RegExp(`^${outputPrefix}-\\d+\\.wav$`, "i").test(name))
@@ -905,7 +928,12 @@ async function splitNormalizedAudio(
     chunkSeconds,
     logs,
     report,
-    controller
+    controller,
+    {
+      base: 52,
+      span: 2,
+      message: "正在拆分音频以降低转写内存占用"
+    }
   );
 }
 
@@ -1004,7 +1032,8 @@ function parseTranscriptJsonOutput(
   sourceType: "recording" | "file",
   fileName: string,
   requestedLanguage: TranscriptLanguage,
-  modelName: string
+  modelName: string,
+  offsetMs = 0
 ): TranscriptDocument {
   const parsed = JSON.parse(raw) as {
     engine?: TranscriptDocument["engine"];
@@ -1019,8 +1048,8 @@ function parseTranscriptJsonOutput(
   const segments: TranscriptSegment[] = (parsed.segments || [])
     .map((segment, index) => ({
       id: index + 1,
-      startMs: Math.max(0, Number(segment.startMs || 0)),
-      endMs: Math.max(0, Number(segment.endMs || 0)),
+      startMs: offsetMs + Math.max(0, Number(segment.startMs || 0)),
+      endMs: offsetMs + Math.max(0, Number(segment.endMs || 0)),
       text: normalizeSegmentText(segment.text || "")
     }))
     .filter((segment) => segment.text.length > 0 && !isKnownNonSpeechHallucination(segment.text));
@@ -1308,7 +1337,6 @@ async function runFasterWhisper(
     throw new Error("Unable to locate Faster-Whisper runner.");
   }
 
-  report?.({ stage: "transcribing", message: "正在启动 Faster-Whisper 加速引擎", progress: 56 });
   const outputPath = path.join(tempDir, "transcript-faster-whisper.json");
   const modelName = preferences.fasterWhisperModel;
   const modelId = fasterWhisperManagedModelId(modelName);
@@ -1327,23 +1355,81 @@ async function runFasterWhisper(
     batchSize: 0
   };
   pushLog(logs, `Starting Faster-Whisper with ${config.cpuThreads} configured thread(s), VAD, and automatic batch sizing.`);
-  const { result, executable } = await fasterWhisperWorker.transcribe(
-    config,
+  const chunkPaths = await splitAudioFile(
     normalizedPath,
-    language,
+    path.join(tempDir, "faster-chunks"),
+    "faster-chunk",
+    preferences,
+    FASTER_WHISPER_CHUNK_SECONDS,
     logs,
-    {
-      base: 56,
-      span: 32,
-      message: "正在使用 Faster-Whisper 识别语音内容"
-    },
     report,
-    controller
+    controller,
+    {
+      base: 52,
+      span: 2,
+      message: "正在拆分长录音，便于持续显示转写进度"
+    }
   );
-  await fs.writeFile(outputPath, JSON.stringify(result, null, 2), "utf8");
-  const raw = await fs.readFile(outputPath, "utf8");
-  const document = parseTranscriptJsonOutput(raw, sourceType, fileName, language, modelName);
-  pushLog(logs, `Transcribed with faster-whisper via ${path.basename(executable)}`);
+  report?.({ stage: "transcribing", message: "正在启动 Faster-Whisper 加速引擎", progress: 56 });
+  const documents: TranscriptDocument[] = [];
+  let executable = "";
+  let effectiveLanguage = language;
+  for (const [index, chunkPath] of chunkPaths.entries()) {
+    if (controller?.cancelled) {
+      throw new TranscriptionCancelledError();
+    }
+    const progressBase = 56 + (index / Math.max(1, chunkPaths.length)) * 32;
+    const progressSpan = 32 / Math.max(1, chunkPaths.length);
+    const message = `正在使用 Faster-Whisper 识别语音内容（${index + 1}/${chunkPaths.length}）`;
+    const workerResult = await fasterWhisperWorker.transcribe(
+      config,
+      chunkPath,
+      effectiveLanguage,
+      logs,
+      { base: progressBase, span: progressSpan, message },
+      report,
+      controller
+    );
+    executable = workerResult.executable;
+    const document = parseTranscriptJsonOutput(
+      JSON.stringify(workerResult.result),
+      sourceType,
+      fileName,
+      language,
+      modelName,
+      index * FASTER_WHISPER_CHUNK_SECONDS * 1000
+    );
+    documents.push(document);
+    if (effectiveLanguage === "auto") {
+      const detectedLanguage = document.engine.detectedLanguage;
+      if (detectedLanguage === "zh" || detectedLanguage === "en") {
+        effectiveLanguage = detectedLanguage;
+      }
+    }
+  }
+  const segments = documents
+    .flatMap((document) => document.segments)
+    .sort((left, right) => left.startMs - right.startMs)
+    .map((segment, index) => ({ ...segment, id: index + 1 }));
+  const document: TranscriptDocument = {
+    version: 1,
+    source: {
+      type: sourceType,
+      fileName,
+      durationMs: segments.length > 0 ? segments[segments.length - 1].endMs : undefined,
+      language
+    },
+    text: segments.map((segment) => segment.text).join("\n"),
+    segments,
+    createdAt: new Date().toISOString(),
+    engine: {
+      name: "faster-whisper",
+      model: modelName,
+      detectedLanguage: documents.find((item) => item.engine.detectedLanguage)?.engine.detectedLanguage
+    }
+  };
+  await fs.writeFile(outputPath, JSON.stringify(document, null, 2), "utf8");
+  pushLog(logs, `Transcribed ${chunkPaths.length} chunk(s) with faster-whisper via ${path.basename(executable)}`);
   return { document, outputPath };
 }
 
@@ -1359,6 +1445,28 @@ async function runTranscriptionEngine(
   controller?: TranscriptionController
 ) {
   if (preferences.transcriptionEngine === "faster-whisper") {
+    if (!fasterWhisperSupportsLanguage(preferences.fasterWhisperModel, language)) {
+      pushLog(
+        logs,
+        "Distil Large V3 only supports English; using the selected multilingual Whisper.cpp model for automatic or Chinese recognition."
+      );
+      report?.({
+        stage: "transcribing",
+        message: "Distil Large V3 仅支持英语，正在切换到多语言 Whisper.cpp 模型",
+        progress: 54
+      });
+      return runWhisper(
+        normalizedPath,
+        tempDir,
+        preferences,
+        language,
+        logs,
+        sourceType,
+        fileName,
+        report,
+        controller
+      );
+    }
     try {
       return await runFasterWhisper(
         normalizedPath,
@@ -1407,7 +1515,6 @@ async function runWhisper(
   report?: ProgressReporter,
   controller?: TranscriptionController
 ) {
-  report?.({ stage: "transcribing", message: "正在加载 Whisper 模型", progress: 54 });
   const modelPath = await resolveModelPath(preferences, logs);
 
   if (!modelPath) {
@@ -1422,6 +1529,7 @@ async function runWhisper(
   const chunkMs = chunkSeconds * 1000;
 
   const chunks = await splitNormalizedAudio(normalizedPath, tempDir, whisperPreferences, chunkSeconds, logs, report, controller);
+  report?.({ stage: "transcribing", message: "正在加载 Whisper 模型", progress: 54 });
   const documents: TranscriptDocument[] = [];
   let executable = "";
   for (const [index, chunkPath] of chunks.entries()) {
