@@ -16,13 +16,18 @@ const targetPath = path.join(releaseDir, targetName);
 const whisperName = isWindows ? "whisper-cli.exe" : "whisper-cli";
 const whisperPath = path.join(releaseDir, whisperName);
 const pythonName = isWindows ? "python.exe" : "python";
-const pythonPath = path.join(
-  projectRoot,
-  "resources",
-  "python",
+const pythonRoot = path.join(projectRoot, "resources", "python");
+const portablePythonPath = path.join(pythonRoot, pythonName);
+const environmentPythonPath = path.join(
+  pythonRoot,
   isWindows ? "Scripts" : "bin",
   pythonName
 );
+const pythonPath = isWindows
+  ? portablePythonPath
+  : fs.existsSync(portablePythonPath)
+    ? portablePythonPath
+    : environmentPythonPath;
 const fasterWhisperModelPath = path.join(
   projectRoot,
   "resources",
@@ -69,6 +74,22 @@ console.log(`Verified bundled whisper.cpp model: ${whisperCppModelPath}`);
 
 if (!fs.existsSync(pythonPath)) {
   throw new Error(`Bundled Faster-Whisper Python runtime was not found: ${pythonPath}`);
+}
+
+if (isWindows) {
+  const portableRuntimeFiles = [
+    "python311.dll",
+    "python311.zip",
+    "python311._pth",
+    path.join("runtime-packages", "Lib", "site-packages", "faster_whisper", "__init__.py"),
+    path.join("runtime-packages", "Lib", "site-packages", "ctranslate2", "__init__.py")
+  ];
+  for (const relativePath of portableRuntimeFiles) {
+    const requiredPath = path.join(pythonRoot, relativePath);
+    if (!fs.existsSync(requiredPath)) {
+      throw new Error(`Bundled portable Python runtime is incomplete: ${requiredPath}`);
+    }
+  }
 }
 
 console.log(`Verified bundled Faster-Whisper Python runtime: ${pythonPath}`);

@@ -31,6 +31,8 @@ type CommandProgressWindow = {
 
 const FFMPEG_TIMEOUT_MS = 20 * 60 * 1000;
 const WHISPER_TIMEOUT_MS = 3 * 60 * 60 * 1000;
+const FASTER_WORKER_START_TIMEOUT_MS = 3 * 60 * 1000;
+const FASTER_WORKER_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 const WHISPER_SAFE_CHUNK_SECONDS = 60;
 const WHISPER_BALANCED_CHUNK_SECONDS = 180;
 const WHISPER_QUANTIZED_CHUNK_SECONDS = 600;
@@ -221,7 +223,8 @@ function whisperThreadCount(preferences: AppPreferences) {
     return Math.max(2, logicalCores - 1);
   }
 
-  return Math.max(4, Math.min(WHISPER_MAX_AUTO_THREADS, logicalCores - 2));
+  const estimatedPhysicalCores = Math.ceil(logicalCores / 2);
+  return Math.max(4, Math.min(WHISPER_MAX_AUTO_THREADS, estimatedPhysicalCores));
 }
 
 function executableName(baseName: string) {
@@ -261,8 +264,8 @@ function pythonCandidates() {
   const windowsPython = process.platform === "win32" ? "python.exe" : "python";
   const scriptsDir = process.platform === "win32" ? "Scripts" : "bin";
   return uniquePaths([
-    ...resourcePathCandidates("python", scriptsDir, windowsPython),
     ...resourcePathCandidates("python", windowsPython),
+    ...resourcePathCandidates("python", scriptsDir, windowsPython),
     ...(process.platform === "win32" ? ["python.exe", "python"] : ["python3", "python"])
   ]);
 }
@@ -441,6 +444,358 @@ async function runWithCandidates(
   }
   const checkedPaths = candidates.length > 0 ? ` Checked: ${candidates.join(" | ")}` : "";
   throw new Error(`${lastError instanceof Error ? lastError.message : String(lastError)}${checkedPaths}`);
+}
+
+type FasterWhisperRawResult = {
+  text?: string;
+  segments?: Array<{
+    startMs?: number;
+    endMs?: number;
+    text?: string;
+  }>;
+  engine?: TranscriptDocument["engine"];
+};
+
+type FasterWorkerConfig = {
+  runnerPath: string;
+  modelDir: string;
+  modelName: string;
+  device: "auto" | "cpu";
+  computeType: "auto" | "int8";
+  cpuThreads: number;
+  numWorkers: number;
+  batchSize: number;
+};
+
+type FasterWorkerEvent = {
+  type?: "ready" | "runtime" | "progress" | "result" | "error";
+  id?: string;
+  progress?: number;
+  message?: string;
+  device?: string;
+  computeType?: string;
+  cpuThreads?: number;
+  numWorkers?: number;
+  batchSize?: number;
+  fallbackReason?: string;
+  result?: FasterWhisperRawResult;
+};
+
+type FasterWorkerPending = {
+  id: string;
+  startedAt: number;
+  controller?: TranscriptionController;
+  report?: ProgressReporter;
+  progressWindow: CommandProgressWindow;
+  resolve: (result: FasterWhisperRawResult) => void;
+  reject: (error: Error) => void;
+  heartbeatTimer: NodeJS.Timeout;
+  timeoutTimer: NodeJS.Timeout;
+};
+
+class FasterWhisperWorker {
+  private child: ChildProcess | null = null;
+  private configKey = "";
+  private executable = "";
+  private stdoutBuffer = "";
+  private activeLogs: string[] | null = null;
+  private pending: FasterWorkerPending | null = null;
+  private idleTimer: NodeJS.Timeout | null = null;
+  private readyWaiter: {
+    resolve: () => void;
+    reject: (error: Error) => void;
+    controller?: TranscriptionController;
+    timer: NodeJS.Timeout;
+  } | null = null;
+
+  private workerKey(executable: string, config: FasterWorkerConfig) {
+    return JSON.stringify({ executable, ...config });
+  }
+
+  private clearIdleTimer() {
+    if (this.idleTimer) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
+  }
+
+  private scheduleIdleStop() {
+    this.clearIdleTimer();
+    this.idleTimer = setTimeout(() => this.stop(), FASTER_WORKER_IDLE_TIMEOUT_MS);
+    this.idleTimer.unref?.();
+  }
+
+  private log(line: string) {
+    if (this.activeLogs) {
+      pushLog(this.activeLogs, line);
+    }
+  }
+
+  private runtimeLog(event: FasterWorkerEvent) {
+    const device = event.device === "cuda" ? "NVIDIA CUDA" : "CPU";
+    const computeType = event.computeType || "auto";
+    const details = [
+      `${device} ${computeType}`,
+      event.cpuThreads !== undefined ? `${event.cpuThreads || "auto"} thread(s)` : "",
+      event.batchSize !== undefined ? `batch ${event.batchSize}` : ""
+    ].filter(Boolean).join(", ");
+    this.log(`Faster-Whisper runtime: ${details}.`);
+    if (event.fallbackReason) {
+      this.log(`CUDA unavailable; continuing with Faster-Whisper CPU INT8 -> ${event.fallbackReason.slice(0, 320)}`);
+    }
+  }
+
+  private finishReady(error?: Error) {
+    const waiter = this.readyWaiter;
+    if (!waiter) return;
+    this.readyWaiter = null;
+    clearTimeout(waiter.timer);
+    if (error && this.child) {
+      waiter.controller?.detach(this.child);
+    }
+    if (error) waiter.reject(error);
+    else waiter.resolve();
+  }
+
+  private finishPending(error?: Error, result?: FasterWhisperRawResult) {
+    const pending = this.pending;
+    if (!pending) return;
+    this.pending = null;
+    clearInterval(pending.heartbeatTimer);
+    clearTimeout(pending.timeoutTimer);
+    if (this.child) {
+      pending.controller?.detach(this.child);
+    }
+    if (error) pending.reject(error);
+    else pending.resolve(result || {});
+    this.activeLogs = null;
+    this.scheduleIdleStop();
+  }
+
+  private handleEvent(event: FasterWorkerEvent) {
+    if (event.type === "runtime") {
+      this.runtimeLog(event);
+      return;
+    }
+    if (event.type === "ready") {
+      this.finishReady();
+      return;
+    }
+
+    const pending = this.pending;
+    if (!pending || event.id !== pending.id) return;
+    if (event.type === "progress") {
+      const percent = Math.max(0, Math.min(100, Number(event.progress || 0)));
+      pending.report?.({
+        stage: "transcribing",
+        message: pending.progressWindow.message,
+        progress: Math.round(pending.progressWindow.base + (percent / 100) * pending.progressWindow.span),
+        elapsedMs: Date.now() - pending.startedAt
+      });
+      return;
+    }
+    if (event.type === "result") {
+      this.finishPending(undefined, event.result || {});
+      return;
+    }
+    if (event.type === "error") {
+      const error = new Error(event.message || "Faster-Whisper worker failed.");
+      this.finishPending(error);
+      this.stop();
+    }
+  }
+
+  private handleStdout(chunk: Buffer) {
+    this.stdoutBuffer += String(chunk);
+    const lines = this.stdoutBuffer.split(/\r?\n/);
+    this.stdoutBuffer = lines.pop() || "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        this.handleEvent(JSON.parse(trimmed) as FasterWorkerEvent);
+      } catch {
+        this.log(trimmed);
+      }
+    }
+  }
+
+  private handleWorkerExit(child: ChildProcess, error: Error) {
+    if (this.child !== child) return;
+    const cancelled = this.pending?.controller?.cancelled || this.readyWaiter?.controller?.cancelled;
+    const finalError = cancelled ? new TranscriptionCancelledError() : error;
+    this.finishReady(finalError);
+    this.finishPending(finalError);
+    this.child = null;
+    this.configKey = "";
+    this.executable = "";
+    this.stdoutBuffer = "";
+    this.activeLogs = null;
+    this.clearIdleTimer();
+  }
+
+  private async startCandidate(
+    executable: string,
+    config: FasterWorkerConfig,
+    logs: string[],
+    controller?: TranscriptionController
+  ) {
+    const args = [
+      config.runnerPath,
+      "--server",
+      "--model",
+      config.modelName,
+      "--model-dir",
+      config.modelDir,
+      "--device",
+      config.device,
+      "--compute-type",
+      config.computeType,
+      "--cpu-threads",
+      String(config.cpuThreads),
+      "--num-workers",
+      String(config.numWorkers),
+      "--batch-size",
+      String(config.batchSize)
+    ];
+    const child = spawn(executable, args, {
+      cwd: path.dirname(executable),
+      env: {
+        ...process.env,
+        HF_HUB_DISABLE_PROGRESS_BARS: "1",
+        HF_HUB_DISABLE_TELEMETRY: "1",
+        HF_HUB_DISABLE_XET: "1",
+        HF_HUB_OFFLINE: "1",
+        TRANSFORMERS_OFFLINE: "1",
+        PYTHONIOENCODING: "utf-8"
+      },
+      windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+
+    this.child = child;
+    this.executable = executable;
+    this.configKey = this.workerKey(executable, config);
+    this.stdoutBuffer = "";
+    this.activeLogs = logs;
+    controller?.attach(child);
+    child.stdout?.on("data", (chunk: Buffer) => this.handleStdout(chunk));
+    child.stderr?.on("data", (chunk: Buffer) => {
+      for (const line of String(chunk).split(/\r?\n/)) {
+        if (line.trim()) this.log(line.trim());
+      }
+    });
+    child.on("error", (error) => this.handleWorkerExit(child, error));
+    child.on("close", (code) => {
+      this.handleWorkerExit(child, new Error(`${path.basename(executable)} Faster-Whisper worker exited with code ${code}`));
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.finishReady(new Error(`${path.basename(executable)} Faster-Whisper worker timed out while loading the model.`));
+        this.stop();
+      }, FASTER_WORKER_START_TIMEOUT_MS);
+      this.readyWaiter = { resolve, reject, controller, timer };
+    });
+  }
+
+  private async ensureWorker(
+    config: FasterWorkerConfig,
+    logs: string[],
+    controller?: TranscriptionController
+  ) {
+    this.clearIdleTimer();
+    for (const candidate of pythonCandidates()) {
+      if (!(await exists(candidate))) {
+        pushLog(logs, `Candidate missing: ${candidate}`);
+        continue;
+      }
+      const key = this.workerKey(candidate, config);
+      if (this.child && this.configKey === key && !this.child.killed) {
+        this.activeLogs = logs;
+        controller?.attach(this.child);
+        return candidate;
+      }
+
+      this.stop();
+      try {
+        await this.startCandidate(candidate, config, logs, controller);
+        return candidate;
+      } catch (error) {
+        if (isTranscriptionCancelled(error)) throw error;
+        pushLog(logs, `Faster-Whisper worker candidate failed: ${candidate} -> ${error instanceof Error ? error.message : String(error)}`);
+        this.stop();
+      }
+    }
+    throw new Error("Unable to run the bundled Faster-Whisper Python worker.");
+  }
+
+  async transcribe(
+    config: FasterWorkerConfig,
+    audioPath: string,
+    language: TranscriptLanguage,
+    logs: string[],
+    progressWindow: CommandProgressWindow,
+    report?: ProgressReporter,
+    controller?: TranscriptionController
+  ) {
+    if (controller?.cancelled) throw new TranscriptionCancelledError();
+    const executable = await this.ensureWorker(config, logs, controller);
+    if (!this.child?.stdin) throw new Error("Faster-Whisper worker stdin is unavailable.");
+
+    const id = uniqueId("faster");
+    const startedAt = Date.now();
+    const result = await new Promise<FasterWhisperRawResult>((resolve, reject) => {
+      const heartbeatTimer = setInterval(() => {
+        report?.({
+          stage: "transcribing",
+          message: progressWindow.message,
+          progress: Math.round(progressWindow.base),
+          elapsedMs: Date.now() - startedAt
+        });
+      }, 5000);
+      const timeoutTimer = setTimeout(() => {
+        this.finishPending(new Error("Faster-Whisper worker timed out while transcribing audio."));
+        this.stop();
+      }, WHISPER_TIMEOUT_MS);
+      this.pending = {
+        id,
+        startedAt,
+        controller,
+        report,
+        progressWindow,
+        resolve,
+        reject,
+        heartbeatTimer,
+        timeoutTimer
+      };
+      this.child!.stdin!.write(`${JSON.stringify({
+        id,
+        audio: audioPath,
+        language
+      })}\n`);
+    });
+    return { result, executable };
+  }
+
+  stop() {
+    this.clearIdleTimer();
+    const child = this.child;
+    this.child = null;
+    this.configKey = "";
+    this.executable = "";
+    this.stdoutBuffer = "";
+    this.activeLogs = null;
+    if (child && !child.killed) {
+      child.kill();
+    }
+  }
+}
+
+const fasterWhisperWorker = new FasterWhisperWorker();
+
+export function shutdownTranscriptionRuntime() {
+  fasterWhisperWorker.stop();
 }
 
 async function writeRecordingInput(input: RecordingTranscriptionRequest | RecordingAudioExportRequest) {
@@ -967,46 +1322,33 @@ async function runFasterWhisper(
   if (!modelDir) {
     throw new Error("Unable to locate bundled Faster-Whisper models. Reinstall DeskScribe with resources/models/faster-whisper.");
   }
-  const device = preferences.disableGpu ? "cpu" : "auto";
-  const computeType = preferences.disableGpu ? "int8" : "auto";
-  const args = [
+  const config: FasterWorkerConfig = {
     runnerPath,
-    "--audio",
+    modelDir,
+    modelName: BUNDLED_FASTER_WHISPER_MODEL,
+    device: preferences.disableGpu ? "cpu" : "auto",
+    computeType: preferences.disableGpu ? "int8" : "auto",
+    cpuThreads: whisperThreadCount(preferences),
+    numWorkers: 1,
+    batchSize: 0
+  };
+  pushLog(logs, `Starting Faster-Whisper with ${config.cpuThreads} configured thread(s), VAD, and automatic batch sizing.`);
+  const { result, executable } = await fasterWhisperWorker.transcribe(
+    config,
     normalizedPath,
-    "--output",
-    outputPath,
-    "--model",
-    BUNDLED_FASTER_WHISPER_MODEL,
-    "--language",
     language,
-    "--device",
-    device,
-    "--compute-type",
-    computeType,
-    "--model-dir",
-    modelDir
-  ];
-
-  const executable = await runWithCandidates(
-    pythonCandidates(),
-    args,
     logs,
-    "Unable to run Python. Install Python 3.9+ and faster-whisper, or switch back to Whisper.cpp.",
-    "transcribing",
-    WHISPER_TIMEOUT_MS,
-    report,
-    controller,
     {
       base: 56,
       span: 32,
       message: "正在使用 Faster-Whisper 识别语音内容"
-    }
+    },
+    report,
+    controller
   );
+  await fs.writeFile(outputPath, JSON.stringify(result, null, 2), "utf8");
   const raw = await fs.readFile(outputPath, "utf8");
   const document = parseTranscriptJsonOutput(raw, sourceType, fileName, language, BUNDLED_FASTER_WHISPER_MODEL);
-  if (!document.text.trim()) {
-    throw new Error("Faster-Whisper completed but returned empty text. DeskScribe will try the fallback engine when available.");
-  }
   pushLog(logs, `Transcribed with faster-whisper via ${path.basename(executable)}`);
   return { document, outputPath };
 }

@@ -5,6 +5,7 @@ export type ExportFormat = "txt" | "srt" | "json";
 export type TranscriptionStage = "queued" | "normalizing" | "transcribing" | "finalizing" | "completed" | "failed" | "cancelled";
 export type TranscriptionEngine = "whisper-cpp" | "faster-whisper";
 export type FasterWhisperModel = "distil-large-v3" | "large-v3" | "small";
+export type WindowMode = "compact" | "full";
 
 export interface AppPreferences {
   theme: AppTheme;
@@ -77,6 +78,12 @@ export interface RecordingAudioExportRequest {
 }
 
 export interface RendererApi {
+  setWindowMode(mode: WindowMode): Promise<void>;
+  toggleAlwaysOnTop(): Promise<boolean>;
+  toggleMaximizeWindow(): Promise<boolean>;
+  minimizeWindow(): Promise<void>;
+  closeWindow(): Promise<void>;
+  reloadWindow(): Promise<void>;
   getPreferences(): Promise<AppPreferences>;
   savePreferences(next: AppPreferences): Promise<AppPreferences>;
   selectAudioFile(): Promise<string | null>;

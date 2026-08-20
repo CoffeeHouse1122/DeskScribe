@@ -4,8 +4,10 @@ import type {
   RecordingAudioExportRequest,
   TranscriptDocument,
   TranscriptLanguage,
+  TranscriptSegment,
   TranscriptionProgressEvent,
-  TranscriptionResult
+  TranscriptionResult,
+  WindowMode
 } from "../shared/types";
 
 type RecorderState = "idle" | "recording" | "paused" | "processing";
@@ -14,6 +16,7 @@ type EngineModelSelection = "whisper-cpp" | "distil-large-v3";
 
 const LIVE_TRANSCRIPTION_INTERVAL_MS = 8000;
 const LIVE_TRANSCRIPTION_MIN_SECONDS = 3;
+const LIVE_TRANSCRIPTION_OVERLAP_SECONDS = 2;
 const LIVE_PCM_SAMPLE_RATE = 16000;
 
 const defaultPreferences: AppPreferences = {
@@ -32,24 +35,26 @@ const defaultPreferences: AppPreferences = {
 
 export function mountApp(root: HTMLDivElement) {
   root.innerHTML = `
-    <div class="shell">
-      <header class="topbar">
-        <div class="brand-block">
-          <p class="eyebrow">DeskScribe</p>
-          <h1>录音转写台</h1>
-          <p class="subline">后台录音、导入音频、本地 Whisper 转写</p>
+    <div class="shell" data-window-mode="compact">
+      <div class="window-titlebar">
+        <div class="window-brand" aria-label="录音转写台">
+          <span class="window-app-icon"><i class="ri-mic-ai-line" aria-hidden="true"></i></span>
+          <span>录音转写台</span>
         </div>
-        <div class="topbar-actions">
-          <button id="settings-toggle" class="ghost-button icon-text-button" type="button">
-            <i class="ri-settings-3-line" aria-hidden="true"></i>
-            <span>设置</span>
-          </button>
+        <div class="window-controls">
+          <button id="settings-toggle" class="titlebar-button" type="button" title="设置" aria-label="设置"><i class="ri-settings-3-line" aria-hidden="true"></i></button>
+          <button id="mode-toggle" class="titlebar-button" type="button" title="切换到完整模式" aria-label="切换到完整模式"><i class="ri-fullscreen-line" aria-hidden="true"></i></button>
+          <button id="refresh-window" class="titlebar-button" type="button" title="刷新" aria-label="刷新"><i class="ri-refresh-line" aria-hidden="true"></i></button>
+          <button id="pin-window" class="titlebar-button" type="button" title="置顶窗口" aria-label="置顶窗口" aria-pressed="false"><i class="ri-pushpin-line" aria-hidden="true"></i></button>
+          <button id="minimize-window" class="titlebar-button" type="button" title="最小化" aria-label="最小化"><i class="ri-subtract-line" aria-hidden="true"></i></button>
+          <button id="maximize-window" class="titlebar-button" type="button" title="最大化" aria-label="最大化"><i class="ri-checkbox-blank-line" aria-hidden="true"></i></button>
+          <button id="close-window" class="titlebar-button titlebar-close" type="button" title="关闭" aria-label="关闭"><i class="ri-close-line" aria-hidden="true"></i></button>
         </div>
-      </header>
+      </div>
 
       <main class="workspace">
         <section class="column column-compact">
-          <article class="panel panel-primary">
+          <article class="panel panel-primary recording-panel">
             <div class="panel-title">
               <div>
                 <h2><i class="ri-mic-line" aria-hidden="true"></i><span>录音控制</span></h2>
@@ -100,7 +105,7 @@ export function mountApp(root: HTMLDivElement) {
             </div>
           </article>
 
-          <article class="panel">
+          <article class="panel import-panel">
             <div class="panel-title">
               <div>
                 <h2><i class="ri-folder-music-line" aria-hidden="true"></i><span>导入音频</span></h2>
@@ -113,7 +118,7 @@ export function mountApp(root: HTMLDivElement) {
             </div>
           </article>
 
-          <article class="panel">
+          <article class="panel export-panel">
             <div class="panel-title">
               <div>
                 <h2><i class="ri-download-2-line" aria-hidden="true"></i><span>导出结果</span></h2>
@@ -261,11 +266,11 @@ export function mountApp(root: HTMLDivElement) {
 
             <label class="field checkbox-field">
               <input id="disable-gpu-checkbox" type="checkbox" checked />
-              <span>CPU 稳定模式（关闭后尝试 GPU）</span>
+              <span>CPU 稳定模式（关闭后尝试 NVIDIA GPU）</span>
             </label>
 
             <label class="field">
-              <span>Whisper 线程数（0 自动）</span>
+              <span>转写线程数（0 自动）</span>
               <input id="whisper-threads-input" type="number" min="0" step="1" />
             </label>
           </div>
@@ -304,8 +309,15 @@ export function mountApp(root: HTMLDivElement) {
   `;
 
   const refs = {
+    shell: root.querySelector<HTMLElement>(".shell")!,
     settingsPanel: root.querySelector<HTMLElement>("#settings-panel")!,
     settingsToggle: root.querySelector<HTMLButtonElement>("#settings-toggle")!,
+    modeToggle: root.querySelector<HTMLButtonElement>("#mode-toggle")!,
+    refreshWindow: root.querySelector<HTMLButtonElement>("#refresh-window")!,
+    pinWindow: root.querySelector<HTMLButtonElement>("#pin-window")!,
+    minimizeWindow: root.querySelector<HTMLButtonElement>("#minimize-window")!,
+    maximizeWindow: root.querySelector<HTMLButtonElement>("#maximize-window")!,
+    closeWindow: root.querySelector<HTMLButtonElement>("#close-window")!,
     closeSettings: root.querySelector<HTMLButtonElement>("#close-settings")!,
     statePill: root.querySelector<HTMLSpanElement>("#recording-state")!,
     elapsed: root.querySelector<HTMLDivElement>("#elapsed")!,
@@ -349,6 +361,7 @@ export function mountApp(root: HTMLDivElement) {
   };
 
   let preferences = { ...defaultPreferences };
+  let windowMode: WindowMode = "compact";
   let recorderState: RecorderState = "idle";
   let selectedFilePath = "";
   let currentTranscript: TranscriptDocument | null = null;
@@ -364,13 +377,15 @@ export function mountApp(root: HTMLDivElement) {
   let liveSilentOutput: GainNode | null = null;
   let chunks: Blob[] = [];
   let livePcmChunks: Int16Array[] = [];
+  let livePcmBufferStartSample = 0;
   let livePcmSampleCount = 0;
+  let liveProcessedSampleCount = 0;
   let liveLastFlushAt = 0;
   let liveTranscriptionBusy = false;
   let liveTranscriptionStopped = true;
   let liveTranscriptionPending = false;
   let isLiveTranscribing = false;
-  let liveLastSnapshotSize = 0;
+  let liveTranscriptSegments: TranscriptSegment[] = [];
   let liveSegmentIndex = 0;
   let startedAt = 0;
   let pausedAt = 0;
@@ -477,6 +492,27 @@ export function mountApp(root: HTMLDivElement) {
     document.documentElement.dataset.theme = theme;
   }
 
+  function applyWindowMode(mode: WindowMode) {
+    windowMode = mode;
+    refs.shell.dataset.windowMode = mode;
+    document.documentElement.dataset.windowMode = mode;
+    const isCompact = mode === "compact";
+    refs.modeToggle.title = isCompact ? "切换到完整模式" : "切换到精简模式";
+    refs.modeToggle.setAttribute("aria-label", refs.modeToggle.title);
+    refs.modeToggle.querySelector("i")!.className = isCompact ? "ri-fullscreen-line" : "ri-fullscreen-exit-line";
+    refs.maximizeWindow.classList.remove("is-maximized");
+    refs.maximizeWindow.title = "最大化";
+    refs.maximizeWindow.setAttribute("aria-label", "最大化");
+    refs.maximizeWindow.querySelector("i")!.className = "ri-checkbox-blank-line";
+  }
+
+  function syncMaximizeButton(maximized: boolean) {
+    refs.maximizeWindow.classList.toggle("is-maximized", maximized);
+    refs.maximizeWindow.title = maximized ? "还原" : "最大化";
+    refs.maximizeWindow.setAttribute("aria-label", refs.maximizeWindow.title);
+    refs.maximizeWindow.querySelector("i")!.className = maximized ? "ri-file-copy-line" : "ri-checkbox-blank-line";
+  }
+
   function setStatus(text: string) {
     refs.processMessage.textContent = text;
     if (!isTranscribing && !isLiveTranscribing) {
@@ -512,6 +548,7 @@ export function mountApp(root: HTMLDivElement) {
     refs.transcribeFile.disabled = next !== "idle" || !selectedFilePath;
     refs.recordingSourceSelect.querySelector<HTMLButtonElement>(".select-button")!.disabled = next !== "idle";
     refs.liveTranscriptionCheckbox.disabled = next !== "idle";
+    refs.refreshWindow.disabled = next !== "idle" || isTranscribing || isLiveTranscribing;
     syncRecorderProcessState(next);
   }
 
@@ -670,13 +707,15 @@ export function mountApp(root: HTMLDivElement) {
 
   function resetLiveTranscription() {
     livePcmChunks = [];
+    livePcmBufferStartSample = 0;
     livePcmSampleCount = 0;
+    liveProcessedSampleCount = 0;
     liveLastFlushAt = Date.now();
     liveTranscriptionBusy = false;
     liveTranscriptionStopped = !liveTranscriptionRequested();
     liveTranscriptionPending = false;
     isLiveTranscribing = false;
-    liveLastSnapshotSize = 0;
+    liveTranscriptSegments = [];
     liveSegmentIndex = 0;
   }
 
@@ -706,8 +745,11 @@ export function mountApp(root: HTMLDivElement) {
     return output;
   }
 
-  function encodeLivePcmWav() {
-    const dataBytes = livePcmSampleCount * 2;
+  function encodeLivePcmWav(startSample: number, endSample: number) {
+    const safeStart = Math.max(livePcmBufferStartSample, Math.min(startSample, livePcmSampleCount));
+    const safeEnd = Math.max(safeStart, Math.min(endSample, livePcmSampleCount));
+    const sampleCount = safeEnd - safeStart;
+    const dataBytes = sampleCount * 2;
     const bytes = new Uint8Array(44 + dataBytes);
     const view = new DataView(bytes.buffer);
     const writeAscii = (offset: number, value: string) => {
@@ -731,13 +773,36 @@ export function mountApp(root: HTMLDivElement) {
     view.setUint32(40, dataBytes, true);
 
     let offset = 44;
+    let chunkStart = livePcmBufferStartSample;
     for (const chunk of livePcmChunks) {
-      for (let index = 0; index < chunk.length; index += 1) {
+      const chunkEnd = chunkStart + chunk.length;
+      const copyStart = Math.max(safeStart, chunkStart);
+      const copyEnd = Math.min(safeEnd, chunkEnd);
+      for (let index = copyStart - chunkStart; index < copyEnd - chunkStart; index += 1) {
         view.setInt16(offset, chunk[index] || 0, true);
         offset += 2;
       }
+      chunkStart = chunkEnd;
+      if (chunkStart >= safeEnd) break;
     }
     return bytes;
+  }
+
+  function trimLivePcmBefore(sample: number) {
+    const target = Math.max(livePcmBufferStartSample, Math.min(sample, livePcmSampleCount));
+    let remaining = target - livePcmBufferStartSample;
+    while (remaining > 0 && livePcmChunks.length > 0) {
+      const first = livePcmChunks[0];
+      if (remaining >= first.length) {
+        remaining -= first.length;
+        livePcmBufferStartSample += first.length;
+        livePcmChunks.shift();
+      } else {
+        livePcmChunks[0] = first.slice(remaining);
+        livePcmBufferStartSample += remaining;
+        remaining = 0;
+      }
+    }
   }
 
   function startLivePcmCapture(mixer: AudioNode) {
@@ -766,22 +831,49 @@ export function mountApp(root: HTMLDivElement) {
     audioGraphNodes.push(livePcmProcessor, liveSilentOutput);
   }
 
-  function renderLiveTranscript(document: TranscriptDocument) {
-    const text = document.text.trim();
-    if (!text) return;
-    refs.transcriptText.value = text;
+  function renderLiveTranscript(document: TranscriptDocument, snapshotStartSample: number) {
+    const snapshotStartMs = Math.round(snapshotStartSample * 1000 / LIVE_PCM_SAMPLE_RATE);
+    const incoming = document.segments.map((segment) => ({
+      ...segment,
+      startMs: snapshotStartMs + segment.startMs,
+      endMs: snapshotStartMs + segment.endMs
+    }));
+    if (incoming.length === 0 && document.text.trim()) {
+      incoming.push({
+        id: 1,
+        startMs: snapshotStartMs,
+        endMs: snapshotStartMs,
+        text: document.text.trim()
+      });
+    }
+    if (incoming.length === 0) return;
+
+    const retained = liveTranscriptSegments.filter((segment) => segment.endMs <= snapshotStartMs);
+    liveTranscriptSegments = [...retained, ...incoming]
+      .sort((left, right) => left.startMs - right.startMs)
+      .filter((segment, index, segments) => {
+        const previous = segments[index - 1];
+        return !previous || previous.text !== segment.text || previous.startMs !== segment.startMs;
+      })
+      .map((segment, index) => ({ ...segment, id: index + 1 }));
+    refs.transcriptText.value = liveTranscriptSegments.map((segment) => segment.text).join("\n");
     refs.transcriptText.scrollTop = refs.transcriptText.scrollHeight;
   }
 
   async function transcribeLiveSnapshot() {
-    if (!livePcmSampleCount || liveTranscriptionStopped) return;
+    if (livePcmSampleCount <= liveProcessedSampleCount || liveTranscriptionStopped) return;
     liveTranscriptionBusy = true;
     isLiveTranscribing = true;
     setRecorderState(recorderState);
     applyTranscriptionProgress({ stage: "queued", message: "实时转写预览已提交", progress: 5 });
     refs.cancelTranscription.disabled = false;
+    const snapshotEndSample = livePcmSampleCount;
+    const overlapSamples = LIVE_TRANSCRIPTION_OVERLAP_SECONDS * LIVE_PCM_SAMPLE_RATE;
+    const snapshotStartSample = liveProcessedSampleCount > 0
+      ? Math.max(livePcmBufferStartSample, liveProcessedSampleCount - overlapSamples)
+      : livePcmBufferStartSample;
     try {
-      const bytes = encodeLivePcmWav();
+      const bytes = encodeLivePcmWav(snapshotStartSample, snapshotEndSample);
       if (bytes.byteLength < 4096) return;
       const fileName = `live-recording-${String(++liveSegmentIndex).padStart(3, "0")}`;
       const result = await window.deskScribe.transcribeRecording({
@@ -790,7 +882,9 @@ export function mountApp(root: HTMLDivElement) {
         fileName,
         language: currentLanguage()
       });
-      renderLiveTranscript(result.document);
+      renderLiveTranscript(result.document, snapshotStartSample);
+      liveProcessedSampleCount = Math.max(liveProcessedSampleCount, snapshotEndSample);
+      trimLivePcmBefore(Math.max(0, liveProcessedSampleCount - overlapSamples));
       applyTranscriptionProgress({ stage: "completed", message: "实时转写预览已更新", progress: 100 });
       setStatus(result.document.text.trim()
         ? "实时转写预览已更新。停止录音后仍可点击“开始转写”生成完整结果。"
@@ -798,6 +892,9 @@ export function mountApp(root: HTMLDivElement) {
     } catch (error) {
       const message = normalizeErrorMessage(error);
       const cancelled = message === "已取消转写。";
+      liveTranscriptionStopped = true;
+      liveTranscriptionPending = false;
+      refs.liveTranscriptionCheckbox.checked = false;
       applyTranscriptionProgress({
         stage: cancelled ? "cancelled" : "failed",
         message: cancelled ? "实时转写预览已取消，录音仍在继续。" : `实时转写预览失败：${message}`,
@@ -824,10 +921,9 @@ export function mountApp(root: HTMLDivElement) {
       liveTranscriptionPending = true;
       return;
     }
-    if (!livePcmSampleCount) return;
-    if (!force && livePcmSampleCount < LIVE_PCM_SAMPLE_RATE * LIVE_TRANSCRIPTION_MIN_SECONDS) return;
-    if (!force && livePcmSampleCount === liveLastSnapshotSize) return;
-    liveLastSnapshotSize = livePcmSampleCount;
+    const pendingSamples = livePcmSampleCount - liveProcessedSampleCount;
+    if (pendingSamples <= 0) return;
+    if (!force && pendingSamples < LIVE_PCM_SAMPLE_RATE * LIVE_TRANSCRIPTION_MIN_SECONDS) return;
     liveLastFlushAt = Date.now();
     void transcribeLiveSnapshot();
   }
@@ -1160,6 +1256,33 @@ export function mountApp(root: HTMLDivElement) {
 
   refs.settingsToggle.addEventListener("click", () => openSettings(true));
   refs.closeSettings.addEventListener("click", () => openSettings(false));
+  refs.modeToggle.addEventListener("click", () => {
+    const nextMode: WindowMode = windowMode === "compact" ? "full" : "compact";
+    applyWindowMode(nextMode);
+    void window.deskScribe.setWindowMode(nextMode);
+  });
+  refs.refreshWindow.addEventListener("click", () => {
+    if (!refs.refreshWindow.disabled) {
+      void window.deskScribe.reloadWindow();
+    }
+  });
+  refs.pinWindow.addEventListener("click", () => {
+    void window.deskScribe.toggleAlwaysOnTop().then((active) => {
+      refs.pinWindow.classList.toggle("is-active", active);
+      refs.pinWindow.setAttribute("aria-pressed", String(active));
+      refs.pinWindow.title = active ? "取消置顶" : "置顶窗口";
+      refs.pinWindow.setAttribute("aria-label", refs.pinWindow.title);
+    });
+  });
+  refs.minimizeWindow.addEventListener("click", () => {
+    void window.deskScribe.minimizeWindow();
+  });
+  refs.maximizeWindow.addEventListener("click", () => {
+    void window.deskScribe.toggleMaximizeWindow().then(syncMaximizeButton);
+  });
+  refs.closeWindow.addEventListener("click", () => {
+    void window.deskScribe.closeWindow();
+  });
 
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
@@ -1181,6 +1304,7 @@ export function mountApp(root: HTMLDivElement) {
     if (isLiveTranscribing) {
       liveTranscriptionStopped = true;
       liveTranscriptionPending = false;
+      refs.liveTranscriptionCheckbox.checked = false;
       setStatus("正在取消实时转写预览，录音会继续。");
     } else {
       setStatus("正在取消转写。");
@@ -1289,6 +1413,7 @@ export function mountApp(root: HTMLDivElement) {
   const unsubscribeProgress = window.deskScribe.onTranscriptionProgress(applyTranscriptionProgress);
 
   renderTranscript(null);
+  applyWindowMode("compact");
   resetProcessView("选择音频或结束录音后，会在这里显示转换、识别和整理状态。");
   setRecorderState("idle");
   updateElapsed(0);

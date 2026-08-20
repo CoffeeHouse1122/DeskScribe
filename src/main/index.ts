@@ -11,6 +11,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { registerIpc } from "./ipc";
 import { loadPreferences } from "./preferences";
+import { shutdownTranscriptionRuntime } from "./transcription";
+import { getInitialWindowBounds } from "./window-layout";
 import type { AppPreferences, CloseBehavior } from "../shared/types";
 
 let mainWindow: BrowserWindow | null = null;
@@ -177,15 +179,20 @@ function attachWindowGuards(window: BrowserWindow) {
 
 async function createMainWindow() {
   const icon = createAppIcon();
+  const initialBounds = getInitialWindowBounds();
   mainWindow = new BrowserWindow({
-    width: 1120,
-    height: 720,
-    minWidth: 1120,
-    minHeight: 720,
+    ...initialBounds,
+    minWidth: initialBounds.width,
+    minHeight: initialBounds.height,
+    maxWidth: initialBounds.width,
+    maxHeight: initialBounds.height,
+    resizable: false,
+    maximizable: false,
     backgroundColor: "#f4f8ff",
     show: true,
     title: "DeskScribe",
     icon,
+    frame: false,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(app.getAppPath(), "dist/preload/index.js"),
@@ -223,6 +230,7 @@ if (singleInstance) {
 
   app.on("before-quit", () => {
     isQuitting = true;
+    shutdownTranscriptionRuntime();
   });
 
   app.on("activate", () => {

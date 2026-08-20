@@ -7,10 +7,17 @@ import type {
   RendererApi,
   TranscriptDocument,
   TranscriptLanguage,
-  TranscriptionProgressEvent
+  TranscriptionProgressEvent,
+  WindowMode
 } from "../shared/types";
 
 const api: RendererApi = {
+  setWindowMode: (mode: WindowMode) => ipcRenderer.invoke("window:set-mode", mode),
+  toggleAlwaysOnTop: () => ipcRenderer.invoke("window:toggle-always-on-top"),
+  toggleMaximizeWindow: () => ipcRenderer.invoke("window:toggle-maximize"),
+  minimizeWindow: () => ipcRenderer.invoke("window:minimize"),
+  closeWindow: () => ipcRenderer.invoke("window:close"),
+  reloadWindow: () => ipcRenderer.invoke("window:reload"),
   getPreferences: () => ipcRenderer.invoke("preferences:get"),
   savePreferences: (next: AppPreferences) => ipcRenderer.invoke("preferences:save", next),
   selectAudioFile: () => ipcRenderer.invoke("dialog:audio-file"),
