@@ -539,6 +539,12 @@ export function mountApp(root: HTMLDivElement) {
     }
   }
 
+  function setPathText(element: HTMLElement, filePath: string, emptyText: string) {
+    element.textContent = filePath || emptyText;
+    element.toggleAttribute("data-tail-path", Boolean(filePath));
+    element.title = filePath;
+  }
+
   function syncRecorderProcessState(next: RecorderState) {
     if (isTranscribing || isLiveTranscribing) return;
     refs.processStage.textContent =
@@ -792,7 +798,7 @@ export function mountApp(root: HTMLDivElement) {
       renderTranscript(result.document);
       applyTranscriptionProgress({ stage: "completed", message: "转写完成", progress: 100 });
       setStatus(`转写完成，检测语言：${result.document.engine.detectedLanguage || result.document.source.language}`);
-      refs.exportPath.textContent = result.outputPath;
+      setPathText(refs.exportPath, result.outputPath, "导出后会自动定位文件位置。");
     } catch (error) {
       const missingModel = /MODEL_NOT_INSTALLED:/i.test(error instanceof Error ? error.message : String(error));
       const message = normalizeErrorMessage(error);
@@ -1291,7 +1297,7 @@ export function mountApp(root: HTMLDivElement) {
   async function pickAudioFile() {
     const filePath = await window.deskScribe.selectAudioFile();
     selectedFilePath = filePath || "";
-    refs.selectedFile.textContent = selectedFilePath || "未选择文件";
+    setPathText(refs.selectedFile, selectedFilePath, "未选择文件");
     refs.transcribeFile.disabled = !selectedFilePath || recorderState !== "idle";
   }
 
@@ -1309,7 +1315,7 @@ export function mountApp(root: HTMLDivElement) {
     if (!currentTranscript) return;
     const filePath = await window.deskScribe.exportTranscript(currentTranscript, format);
     if (filePath) {
-      refs.exportPath.textContent = filePath;
+      setPathText(refs.exportPath, filePath, "导出后会自动定位文件位置。");
       await window.deskScribe.revealPath(filePath);
       setStatus(`${format.toUpperCase()} 已导出。`);
     }

@@ -383,6 +383,15 @@ h2 i {
   background-clip: content-box;
 }
 
+.column-compact::-webkit-scrollbar-button,
+.process-log::-webkit-scrollbar-button,
+.transcript-text::-webkit-scrollbar-button,
+.settings-content::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 .panel {
   position: relative;
   min-width: 0;
@@ -528,6 +537,12 @@ h2 i {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+#selected-file[data-tail-path],
+#export-path[data-tail-path] {
+  direction: rtl;
+  text-align: left;
 }
 
 code {
@@ -1394,9 +1409,25 @@ code {
 }
 
 .shell[data-window-mode="compact"] .process-log {
-  min-height: 0;
+  display: block;
+  height: 25px;
+  min-height: 25px;
   margin-top: 4px;
-  padding: 5px 7px;
+  padding: 4px 7px;
+  overflow: hidden;
+  border-radius: 0;
+  line-height: 15px;
+}
+
+.shell[data-window-mode="compact"] .process-log p {
+  display: none;
+}
+
+.shell[data-window-mode="compact"] .process-log p:first-child {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .shell[data-window-mode="compact"] .progress-track {
