@@ -1414,18 +1414,23 @@ code {
   min-height: 25px;
   margin-top: 4px;
   padding: 4px 7px;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   border-radius: 0;
   line-height: 15px;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
 }
 
-.shell[data-window-mode="compact"] .process-log p {
+.shell[data-window-mode="compact"] .process-log::-webkit-scrollbar {
   display: none;
 }
 
-.shell[data-window-mode="compact"] .process-log p:first-child {
+.shell[data-window-mode="compact"] .process-log p {
   display: block;
+  width: 100%;
   overflow: hidden;
+  overflow-wrap: normal;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
