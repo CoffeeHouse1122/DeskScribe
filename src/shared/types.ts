@@ -149,6 +149,7 @@ export interface RendererApi {
   onModelDownloadProgress(callback: (progress: ModelDownloadProgress) => void): () => void;
   getUpdateState(): Promise<AppUpdateState>;
   checkForUpdates(): Promise<AppUpdateState>;
+  downloadUpdate(): Promise<void>;
   installUpdate(): Promise<void>;
   onUpdateState(callback: (state: AppUpdateState) => void): () => void;
   transcribeRecording(input: RecordingTranscriptionRequest): Promise<TranscriptionResult>;

@@ -192,22 +192,10 @@ export function mountApp(root: HTMLDivElement) {
             <div>
               <h2><i class="ri-settings-3-line" aria-hidden="true"></i><span>偏好设置</span></h2>
             </div>
-            <button id="close-settings" class="ghost-button icon-text-button" type="button"><i class="ri-close-line" aria-hidden="true"></i><span>关闭</span></button>
+            <button id="close-settings" class="ghost-button icon-only-button" type="button" title="关闭偏好设置" aria-label="关闭偏好设置"><i class="ri-close-line" aria-hidden="true"></i></button>
           </div>
 
-          <section class="update-card" aria-labelledby="update-title">
-            <div class="update-copy">
-              <span class="section-kicker">应用更新</span>
-              <strong id="update-title">DeskScribe <span id="current-version">—</span></strong>
-              <span id="update-message">正在读取版本信息</span>
-            </div>
-            <div class="update-actions">
-              <button id="check-update" class="ghost-button icon-text-button" type="button"><i class="ri-refresh-line" aria-hidden="true"></i><span>检查</span></button>
-              <button id="install-update" class="primary-button icon-text-button" type="button" hidden><i class="ri-restart-line" aria-hidden="true"></i><span>重启安装</span></button>
-            </div>
-            <div id="update-progress-track" class="mini-progress" hidden><span id="update-progress"></span></div>
-          </section>
-
+          <div class="settings-content">
           <div class="settings-grid">
             <label class="field">
               <span>主题</span>
@@ -278,20 +266,6 @@ export function mountApp(root: HTMLDivElement) {
             </label>
           </div>
 
-          <section class="model-library" aria-labelledby="model-library-title">
-            <div class="model-library-head">
-              <div>
-                <span class="section-kicker">按需下载 · 更新保留</span>
-                <h3 id="model-library-title">本地模型库</h3>
-              </div>
-              <button id="open-models-directory" class="ghost-button icon-only-button" type="button" title="打开模型目录" aria-label="打开模型目录"><i class="ri-folder-open-line" aria-hidden="true"></i></button>
-            </div>
-            <p class="model-library-note">模型独立保存在用户数据目录。应用升级不会重复下载，也不会覆盖已安装模型。</p>
-            <div id="model-list" class="model-list" aria-live="polite">
-              <p class="muted">正在读取模型状态…</p>
-            </div>
-          </section>
-
           <div class="path-stack">
             <div class="path-field path-field-with-clear">
               <label class="field field-block">
@@ -320,6 +294,33 @@ export function mountApp(root: HTMLDivElement) {
             </div>
 
           </div>
+
+          <section class="model-library" aria-labelledby="model-library-title">
+            <div class="model-library-head">
+              <div>
+                <h3 id="model-library-title">本地模型库</h3>
+                <p class="model-library-note">按需下载，应用更新不会影响已安装模型。</p>
+              </div>
+              <button id="open-models-directory" class="ghost-button icon-only-button" type="button" title="打开模型目录" aria-label="打开模型目录"><i class="ri-folder-open-line" aria-hidden="true"></i></button>
+            </div>
+            <div id="model-list" class="model-list" aria-live="polite">
+              <p class="muted">正在读取模型状态…</p>
+            </div>
+          </section>
+
+          <section class="update-card" aria-labelledby="update-title">
+            <div class="update-copy">
+              <strong id="update-title">应用更新 <span id="current-version">—</span></strong>
+              <span id="update-message">正在读取版本信息</span>
+            </div>
+            <div class="update-actions">
+              <button id="check-update" class="ghost-button icon-text-button" type="button"><i class="ri-refresh-line" aria-hidden="true"></i><span>检查更新</span></button>
+              <button id="download-update" class="primary-button icon-text-button" type="button" hidden><i class="ri-download-cloud-2-line" aria-hidden="true"></i><span>下载更新</span></button>
+              <button id="install-update" class="primary-button icon-text-button" type="button" hidden><i class="ri-restart-line" aria-hidden="true"></i><span>安装更新</span></button>
+            </div>
+            <div id="update-progress-track" class="mini-progress" hidden><span id="update-progress"></span></div>
+          </section>
+          </div>
         </div>
       </aside>
     </div>
@@ -339,6 +340,7 @@ export function mountApp(root: HTMLDivElement) {
     currentVersion: root.querySelector<HTMLSpanElement>("#current-version")!,
     updateMessage: root.querySelector<HTMLSpanElement>("#update-message")!,
     checkUpdate: root.querySelector<HTMLButtonElement>("#check-update")!,
+    downloadUpdate: root.querySelector<HTMLButtonElement>("#download-update")!,
     installUpdate: root.querySelector<HTMLButtonElement>("#install-update")!,
     updateProgressTrack: root.querySelector<HTMLElement>("#update-progress-track")!,
     updateProgress: root.querySelector<HTMLElement>("#update-progress")!,
@@ -645,19 +647,16 @@ export function mountApp(root: HTMLDivElement) {
         : "";
       return `
         <article class="model-card ${selected ? "is-selected" : ""}" data-model-id="${model.id}">
-          <div class="model-card-top">
+          <div class="model-card-main">
             <div class="model-title-row">
               <strong>${escapeHtml(model.displayName)}</strong>
               ${model.recommended ? '<span class="model-badge recommended">默认推荐</span>' : ""}
               <span class="model-badge ${model.installed ? "installed" : ""}">${model.installed ? "已安装" : formatBytes(model.sizeBytes)}</span>
             </div>
-            <span class="model-language">${escapeHtml(model.languageHint)}</span>
+            <p>${escapeHtml(model.description)}</p>
+            <span class="model-meta">${escapeHtml(model.languageHint)} · ${formatBytes(model.sizeBytes)} · ${escapeHtml(model.hardwareHint)}</span>
           </div>
-          <p>${escapeHtml(model.description)}</p>
-          <div class="model-card-foot">
-            <span><i class="ri-cpu-line" aria-hidden="true"></i>${escapeHtml(model.hardwareHint)}</span>
-            <div class="model-card-actions">${action}</div>
-          </div>
+          <div class="model-card-actions">${action}</div>
           ${progressMarkup}
         </article>`;
     }).join("");
@@ -675,9 +674,11 @@ export function mountApp(root: HTMLDivElement) {
   function renderUpdateState() {
     refs.currentVersion.textContent = updateState.currentVersion ? `v${updateState.currentVersion}` : "—";
     refs.updateMessage.textContent = updateState.message;
-    refs.checkUpdate.disabled = updateState.phase === "checking" || updateState.phase === "downloading";
+    refs.checkUpdate.hidden = updateState.phase === "available" || updateState.phase === "downloading" || updateState.phase === "downloaded";
+    refs.checkUpdate.disabled = updateState.phase === "checking" || updateState.phase === "disabled";
+    refs.downloadUpdate.hidden = updateState.phase !== "available";
     refs.installUpdate.hidden = updateState.phase !== "downloaded";
-    const showProgress = updateState.phase === "available" || updateState.phase === "downloading" || updateState.phase === "downloaded";
+    const showProgress = updateState.phase === "downloading" || updateState.phase === "downloaded";
     refs.updateProgressTrack.hidden = !showProgress;
     refs.updateProgress.style.width = `${updateState.percent ?? 0}%`;
   }
@@ -1427,8 +1428,17 @@ export function mountApp(root: HTMLDivElement) {
       renderUpdateState();
     });
   });
+  refs.downloadUpdate.addEventListener("click", () => {
+    void window.deskScribe.downloadUpdate().catch((error) => {
+      updateState = { ...updateState, phase: "error", message: normalizeErrorMessage(error) };
+      renderUpdateState();
+    });
+  });
   refs.installUpdate.addEventListener("click", () => {
-    void window.deskScribe.installUpdate();
+    void window.deskScribe.installUpdate().catch((error) => {
+      updateState = { ...updateState, phase: "error", message: normalizeErrorMessage(error) };
+      renderUpdateState();
+    });
   });
   refs.openModelsDirectory.addEventListener("click", () => {
     void window.deskScribe.openModelsDirectory().catch((error) => setStatus(normalizeErrorMessage(error)));

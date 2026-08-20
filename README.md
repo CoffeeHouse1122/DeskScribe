@@ -62,7 +62,7 @@ Windows 默认目录：
 
 ## GitHub Releases 自动更新
 
-`electron-updater` 在已安装的生产包中启动后自动检查 GitHub Releases，每六小时再次检查。发现新版本后后台下载，退出应用时安装；设置页也可以立即检查或重启安装。
+`electron-updater` 在已安装的生产包启动 12 秒后检查一次 GitHub Releases，后续检查由用户在设置页手动触发。发现新版本后，下载和安装均需要用户分别点击确认，关闭应用不会自动安装更新。
 
 发布前先更新 `package.json` 版本，然后提交并推送匹配的标签：
 

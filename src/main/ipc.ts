@@ -9,7 +9,7 @@ import {
   getModelsRoot,
   isManagedModelId
 } from "./model-manager";
-import { checkForUpdates, getUpdateState, installDownloadedUpdate } from "./updater";
+import { checkForUpdates, downloadAvailableUpdate, getUpdateState, installDownloadedUpdate } from "./updater";
 import {
   TranscriptionController,
   exportRecordingAudio,
@@ -206,6 +206,11 @@ export function registerIpc(handlers: IpcHandlers = {}) {
   ipcMain.handle("update:check", async (event) => {
     assertTrustedSender(event);
     return checkForUpdates();
+  });
+
+  ipcMain.handle("update:download", async (event) => {
+    assertTrustedSender(event);
+    await downloadAvailableUpdate();
   });
 
   ipcMain.handle("update:install", (event) => {

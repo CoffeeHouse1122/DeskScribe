@@ -2,15 +2,13 @@ import { app, BrowserWindow } from "electron";
 import { autoUpdater } from "electron-updater";
 import type { AppUpdateState } from "../shared/types";
 
-const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
-
 let state: AppUpdateState = {
   phase: app.isPackaged ? "idle" : "disabled",
   currentVersion: app.getVersion(),
   message: app.isPackaged ? "尚未检查更新" : "开发模式不检查更新"
 };
 let initialized = false;
-let checkTimer: NodeJS.Timeout | null = null;
+let initialCheckTimer: NodeJS.Timeout | null = null;
 
 function publishState(next: Partial<AppUpdateState>) {
   state = { ...state, ...next, currentVersion: app.getVersion() };
@@ -41,6 +39,15 @@ export async function checkForUpdates() {
   return state;
 }
 
+export async function downloadAvailableUpdate() {
+  if (!app.isPackaged) return;
+  if (state.phase !== "available") {
+    throw new Error("当前没有可下载的更新。");
+  }
+  publishState({ phase: "downloading", message: "正在下载更新 0.0%", percent: 0 });
+  await autoUpdater.downloadUpdate();
+}
+
 export function installDownloadedUpdate() {
   if (state.phase !== "downloaded") {
     throw new Error("当前没有已下载的更新。");
@@ -51,8 +58,8 @@ export function installDownloadedUpdate() {
 export function initializeAutoUpdater() {
   if (initialized || !app.isPackaged) return;
   initialized = true;
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.allowPrerelease = false;
 
   autoUpdater.on("checking-for-update", () => {
@@ -62,8 +69,8 @@ export function initializeAutoUpdater() {
     publishState({
       phase: "available",
       availableVersion: info.version,
-      message: `发现 ${info.version}，正在后台下载`,
-      percent: 0
+      message: `发现 ${info.version}，确认后即可下载`,
+      percent: undefined
     });
   });
   autoUpdater.on("update-not-available", () => {
@@ -81,26 +88,23 @@ export function initializeAutoUpdater() {
       phase: "downloaded",
       availableVersion: info.version,
       percent: 100,
-      message: `${info.version} 已下载，退出应用时将自动安装`
+      message: `${info.version} 已下载，确认后即可安装`
     });
   });
   autoUpdater.on("error", (error) => {
     publishState({ phase: "error", message: `自动更新失败：${errorMessage(error)}` });
   });
 
-  const initialTimer = setTimeout(() => {
+  initialCheckTimer = setTimeout(() => {
+    initialCheckTimer = null;
     void checkForUpdates();
   }, 12_000);
-  initialTimer.unref();
-  checkTimer = setInterval(() => {
-    void checkForUpdates();
-  }, CHECK_INTERVAL_MS);
-  checkTimer.unref();
+  initialCheckTimer.unref();
 }
 
 export function shutdownAutoUpdater() {
-  if (checkTimer) {
-    clearInterval(checkTimer);
-    checkTimer = null;
+  if (initialCheckTimer) {
+    clearTimeout(initialCheckTimer);
+    initialCheckTimer = null;
   }
 }
