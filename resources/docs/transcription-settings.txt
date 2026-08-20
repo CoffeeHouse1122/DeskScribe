@@ -1,51 +1,53 @@
 DeskScribe 转写设置说明
 
-本文档说明“偏好设置”中与转写模型、速度和计算设备相关的选项。打包后可在安装目录的 resources/docs/transcription-settings.txt 查看。
+本文档说明转写引擎、本地模型和计算设备选项。
 
 1. 转写引擎
 
 Whisper.cpp 稳定
-- 使用 DeskScribe 内置 whisper-cli 和本地模型库中的 Whisper.cpp 模型。
-- 当前随应用打包的是 CPU 运行时，因此固定使用 CPU；设置页会禁用计算设备选项。
-- Whisper Small 适合低配置设备，Large V3 Q5_0 适合更看重识别质量的中英文场景。
-- 长录音速度通常慢于 Faster-Whisper，尤其使用 Large 系列模型时。
+- 使用内置 whisper-cli，当前仅支持 CPU。
+- Whisper Small 适合低配置设备；Large V3 Q5_0 适合更重视中英文识别质量的场景。
 
 Faster-Whisper 加速
-- 使用 DeskScribe 内置 Python、Faster-Whisper 和 CTranslate2 运行时。
-- Large V3 Turbo 适合中文、英文和中英混合转写；Distil Large V3 定位为英语专项。
-- 模型按需下载到 userData/models，应用更新不会覆盖，默认卸载也会保留。
-- 支持 NVIDIA CUDA，CUDA 不可用或加载失败时自动回退到 CPU INT8。
-- AMD、Intel 核显不会用于 Faster-Whisper 加速。
+- 使用内置 Python、Faster-Whisper 和 CTranslate2 运行时。
+- Large V3 Turbo 适合中文、英文和中英混合转写；Distil Large V3 仅适合英语。
+- 支持 NVIDIA CUDA；CUDA 不可用或加载失败时自动回退到 CPU INT8。
+- AMD 和 Intel 核显当前不能用于 Faster-Whisper 加速。
 
 2. 本地模型库
 
-- 下载完成后应用自动切换到该模型。
-- 已安装多个模型时，可以点击“使用”进行切换。
-- Faster-Whisper 模型和 Whisper.cpp 模型会自动切换到各自对应的转写引擎。
-- 也可以手动复制模型：Whisper.cpp 的 .bin 文件放在 userData/models 根目录；Faster-Whisper 的完整模型文件放在 userData/models/faster-whisper/<模型名> 目录。
-- 文件名和文件大小与模型清单匹配时，打开设置或从文件管理器返回应用后会自动识别。
+Windows 模型目录：
+
+%APPDATA%\DeskScribe\models
+
+- 模型卡片会标注对应的转写引擎。
+- 模型从固定版本的 Hugging Face 上游仓库下载，支持断点续传和文件校验。
+- 下载完成后会自动切换到该模型；已安装模型可点击“使用”切换。
+- 切换模型时会同步切换到对应的转写引擎。
+- 应用升级不会覆盖模型，默认卸载也会保留模型。
+
+手动放置模型：
+- Whisper.cpp 的 .bin 文件放在 models 根目录。
+- Faster-Whisper 的完整模型目录放在 models\faster-whisper\<模型名>。
+- 文件名和大小与模型清单匹配时，打开设置或返回应用后会自动识别。
 
 3. 计算设备
 
 选择 Faster-Whisper 时：
-- 勾选“强制使用 CPU”：固定使用 CPU INT8，兼容性和稳定性更好。
-- 取消勾选：优先探测 NVIDIA CUDA，使用 GPU Float16；CUDA 不可用时自动使用 CPU INT8。
+- 勾选“强制使用 CPU”：固定使用 CPU INT8，兼容性更好。
+- 取消勾选：优先使用 NVIDIA CUDA；不可用时回退到 CPU INT8。
 
 选择 Whisper.cpp 时：
-- 当前内置运行时仅支持 CPU，因此计算设备选项会被禁用并显示 CPU 状态。
-- 如果以后随应用提供 GPU 版 Whisper.cpp 运行时，再开放对应 GPU 选项。
+- 当前内置运行时仅支持 CPU，计算设备选项不可用。
 
 4. 转写线程数
 
-- 设置为 0：按机器核心数自动分配，并限制在合理上限内。
-- 设置具体数值：控制 CPU 占用，数值不会超过当前机器的逻辑线程数。
-- Whisper.cpp 使用该值执行推理；Faster-Whisper 使用 GPU 时，该值主要影响 CPU 侧处理。
+- 设为 0：根据处理器自动分配。
+- 设置具体数值：限制 CPU 转写使用的线程数，不超过系统逻辑线程数。
 
-5. 使用建议
+5. 模型建议
 
 - 低配置或稳定优先：Whisper Small + Whisper.cpp。
 - 中英文或混合语言：Large V3 Turbo + Faster-Whisper。
-- 英语长音频和低延迟：Distil Large V3 + Faster-Whisper。
-- 中英文质量优先且可以接受更长耗时：Large V3 Q5_0 + Whisper.cpp。
-- 有 NVIDIA CUDA：使用 Faster-Whisper，并取消勾选“强制使用 CPU”。
-- 只有 AMD、Intel 核显：建议勾选“强制使用 CPU”。
+- 英语低延迟：Distil Large V3 + Faster-Whisper。
+- 中英文质量优先且可接受更长耗时：Large V3 Q5_0 + Whisper.cpp。

@@ -1,109 +1,62 @@
 # DeskScribe
 
-DeskScribe 是一个本地优先的 Electron 录音与离线语音转写工具，支持麦克风、系统声音、音频文件导入、Whisper.cpp 和 Faster-Whisper。
+DeskScribe 是一款本地优先的 Windows 录音与离线语音转写工具。它支持麦克风和系统声音录制、音频文件导入、中文/英文识别，并可导出 TXT、SRT 和 JSON。
 
-## 架构
+## 主要功能
 
-- `src/main`：窗口生命周期、IPC、模型管理、自动更新和本地转写能力。
-- `src/preload`：通过 `contextBridge` 暴露最小业务 API。
-- `src/renderer`：录音、转写、设置、模型库和更新界面。
-- `resources/python`：Faster-Whisper 离线运行时，不提交 Git。
-- `resources/bin/Release`：Whisper.cpp 与 FFmpeg 运行时，不提交 Git。
-- 模型不进入安装包，按需下载到 Electron `userData/models`。
+- 使用 Whisper.cpp 或 Faster-Whisper 在本机转写，音频无需上传到云端。
+- 在应用内按需下载和切换模型，支持断点续传与手动放置模型。
+- 提供完整模式和精简模式，可录音后转写或直接导入音频。
+- 通过 GitHub Releases 检查更新；下载和安装均由用户确认。
+- 模型与应用分开存储，升级应用不会覆盖已安装模型。
 
-## 环境要求
+## 数据目录
 
+Windows 用户数据位于：
+
+```text
+%APPDATA%\DeskScribe
+```
+
+模型位于 `%APPDATA%\DeskScribe\models`。默认卸载不会删除用户数据和模型。
+
+## 项目结构
+
+- `src/main`：窗口、IPC、录音转写、模型管理和自动更新。
+- `src/preload`：向界面暴露受限的 Electron API。
+- `src/renderer`：应用界面与交互。
+- `resources`：运行时、图标、脚本和随安装包分发的文档。
+- `.github/workflows/release.yml`：Windows 自动发布流程。
+
+## 开发环境
+
+- Windows x64
 - Node.js 22
 - npm
-- Windows x64 是当前自动发布目标
-- 本地打包需要准备 `resources/python` 和 `resources/bin/Release/whisper-cli.exe`
+- Python 3.11（仅用于准备 Faster-Whisper 离线运行时）
 
-在干净的 Windows 环境中可以运行以下脚本准备固定版本的 Python 3.11、Faster-Whisper 1.2.1 和 Whisper.cpp 1.9.1：
+首次开发前准备依赖和固定版本运行时：
 
 ```powershell
+npm ci
 ./scripts/prepare-windows-runtime.ps1
-```
-
-## 开发与验证
-
-```powershell
-npm install
 npm run dev
-npm run typecheck
-npm run check
 ```
 
-打包命令：
+项目没有必填环境变量。正式代码签名可在 GitHub 仓库中配置 `WIN_CSC_LINK` 和 `WIN_CSC_KEY_PASSWORD`，不得将证书或密码提交到仓库。
+
+## 验证与构建
 
 ```powershell
-npm run pack
-npm run dist
+npm run check
 npm run dist:win
 ```
 
-## 模型管理
+安装包和自动更新文件生成在 `release` 目录。当前项目没有数据库，也不需要数据迁移。
 
-应用提供四种定位明确的托管模型：
+## 发布与更新
 
-- `large-v3-turbo`：默认推荐，适合中文、英文和中英混合原文转写。
-- `distil-large-v3`：英语专项的低延迟模型。
-- `ggml-small.bin`：Whisper.cpp 轻量多语言模型。
-- `ggml-large-v3-q5_0.bin`：Whisper.cpp 高精度量化多语言模型。
+Windows 安装包通过 GitHub Releases 分发。已安装的生产版本会在启动 12 秒后检查一次更新，之后由用户在设置中手动检查；发现新版本后，下载和安装都需要用户确认。
 
-模型从固定的 Hugging Face 上游提交下载，主权重经过 SHA-256 校验。下载中的 `.part` 文件可以继续断点下载，下载完成后应用会自动切换到该模型。应用更新不会覆盖模型；NSIS 默认卸载也会保留用户数据。
-
-Windows 默认目录：
-
-```text
-%APPDATA%\DeskScribe\models
-```
-
-也可以将已有模型手动复制到模型根目录。Whisper.cpp 的 `.bin` 文件直接放在根目录；Faster-Whisper 模型按以下目录结构放置：
-
-```text
-models\
-  ggml-small.bin
-  ggml-large-v3-q5_0.bin
-  faster-whisper\
-    large-v3-turbo\
-      config.json
-      model.bin
-      preprocessor_config.json
-      tokenizer.json
-      vocabulary.json
-    distil-large-v3\
-      config.json
-      model.bin
-      preprocessor_config.json
-      tokenizer.json
-      vocabulary.json
-```
-
-文件名和文件大小与模型清单匹配时，打开设置或从文件管理器返回应用后会自动识别。应用自动下载的模型仍保存在内部版本目录中，两种目录结构可以同时使用。新增模型定义统一维护在 `src/main/model-manager.ts`。
-
-计算设备设置仅对 Faster-Whisper 开放：勾选时强制使用 CPU INT8，取消勾选后优先使用 NVIDIA CUDA，并在不可用时回退 CPU。当前内置 Whisper.cpp 运行时仅支持 CPU。
-
-## GitHub Releases 自动更新
-
-`electron-updater` 在已安装的生产包启动 12 秒后检查一次 GitHub Releases，后续检查由用户在设置页手动触发。发现新版本后，下载和安装均需要用户分别点击确认，关闭应用不会自动安装更新。
-
-发布前先更新 `package.json` 版本，然后提交并推送匹配的标签：
-
-```powershell
-npm version patch
-git push origin main
-git push origin --tags
-```
-
-`.github/workflows/release.yml` 会验证标签与版本一致，准备离线运行时，构建 NSIS 安装包并上传以下更新文件：
-
-- Windows 安装程序 `.exe`
-- 差分下载元数据 `.blockmap`
-- 更新清单 `latest.yml`
-
-Windows 正式签名可配置仓库 Secrets：
-
-- `WIN_CSC_LINK`
-- `WIN_CSC_KEY_PASSWORD`
-
-不要把证书、密码或 GitHub Token 写入源码。macOS 自动更新需要在 macOS Runner 上签名并公证，目前不在自动发布工作流内。
+- [首次发布与后续发布流程](resources/docs/release-guide.md)
+- [转写引擎、模型与计算设备说明](resources/docs/transcription-settings.txt)
