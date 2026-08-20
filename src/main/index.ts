@@ -13,6 +13,8 @@ import { registerIpc } from "./ipc";
 import { loadPreferences } from "./preferences";
 import { shutdownTranscriptionRuntime } from "./transcription";
 import { getInitialWindowBounds } from "./window-layout";
+import { migrateBundledModels } from "./model-manager";
+import { initializeAutoUpdater, shutdownAutoUpdater } from "./updater";
 import type { AppPreferences, CloseBehavior } from "../shared/types";
 
 let mainWindow: BrowserWindow | null = null;
@@ -198,11 +200,19 @@ async function createMainWindow() {
       preload: path.join(app.getAppPath(), "dist/preload/index.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
       backgroundThrottling: false
     }
   });
 
   attachWindowGuards(mainWindow);
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  mainWindow.webContents.on("will-navigate", (event, navigationUrl) => {
+    if (navigationUrl !== mainWindow?.webContents.getURL()) {
+      event.preventDefault();
+    }
+  });
 
   if (process.env.VITE_DEV_SERVER_URL) {
     await mainWindow.loadURL(rendererUrl());
@@ -231,6 +241,7 @@ if (singleInstance) {
   app.on("before-quit", () => {
     isQuitting = true;
     shutdownTranscriptionRuntime();
+    shutdownAutoUpdater();
   });
 
   app.on("activate", () => {
@@ -249,5 +260,7 @@ if (singleInstance) {
     });
     await createMainWindow();
     await createTray();
+    initializeAutoUpdater();
+    void migrateBundledModels();
   });
 }

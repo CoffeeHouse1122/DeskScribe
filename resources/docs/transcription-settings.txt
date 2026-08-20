@@ -6,7 +6,7 @@ DeskScribe 转写设置说明
 
 Whisper.cpp 稳定
 - 默认推荐项，也是 DeskScribe 的保底方案。
-- 使用内置 whisper-cli 和内置 ggml-small.bin 模型，开箱即可离线转写。
+- 使用内置 whisper-cli，模型首次使用时从设置中的模型库按需下载。
 - 如果需要更高准确度，可以在设置中选择外部 ggml/gguf 模型，例如量化 large-v3。
 - 适合只有 CPU、只有核显、离线环境、或不想额外安装 Python 依赖的电脑。
 - 优点是部署简单、稳定、离线可用。
@@ -14,7 +14,10 @@ Whisper.cpp 稳定
 
 Faster-Whisper 加速
 - 使用 DeskScribe 内置 Python + faster-whisper/CTranslate2 运行。
-- 安装包会携带 resources/python 运行时、faster-whisper 依赖，以及 resources/models/faster-whisper/distil-large-v3 模型。
+- 安装包会携带 resources/python 运行时和 faster-whisper 依赖，但不携带模型。
+- 默认推荐 large-v3-turbo：适合中文、英文和中英混合原文转写。
+- distil-large-v3 定位为英语专项模型，不建议用于中文。
+- 模型下载到 userData/models，应用更新不会覆盖，卸载默认也会保留。
 - 用户不需要自行安装 Python 环境，也不需要运行时下载 Faster-Whisper 模型。
 - 适合希望提升长录音转写效率的电脑。
 - 有 NVIDIA CUDA 环境时通常收益最大。
@@ -63,9 +66,10 @@ distil-large-v3
 
 5. 长录音建议
 
-- 如果只要求稳定且不想配置模型：选择 Whisper.cpp 稳定 + CPU 稳定模式，使用内置 ggml-small.bin。
+- 如果只要求稳定且配置较低：下载 Whisper Small，选择 Whisper.cpp 稳定 + CPU 稳定模式。
 - 如果希望 Whisper.cpp 更高准确度：在设置中选择外部 ggml-large-v3-q5_0.bin 或其他 ggml/gguf 模型。
-- 如果希望更快：选择 Faster-Whisper 加速，使用内置 distil-large-v3。
+- 如果处理中英文或混合语言：选择 Faster-Whisper 加速，使用默认的 large-v3-turbo。
+- 如果只处理英文且更看重速度：选择 distil-large-v3。
 - 如果有 NVIDIA CUDA：取消 CPU 稳定模式，并使用 Faster-Whisper 加速。DeskScribe 会优先使用内置 Python 运行时。
 - 如果只有 AMD/Intel 核显：选择 Faster-Whisper 时可以保留 CPU 稳定模式；即使取消勾选，也会自动回到 Faster-Whisper CPU int8，而不是回退 Whisper.cpp。
-- 如果安装包体积敏感：当前安装包只内置 ggml-small.bin，不内置 ggml-large-v3.bin 等大模型；使用 Whisper.cpp 时仍可在设置中选择外部模型文件。
+- 如果希望 Whisper.cpp 获得更高精度：下载 ggml-large-v3-q5_0.bin，或选择外部 GGML/GGUF 模型文件。

@@ -45,7 +45,6 @@ exports.default = async function afterPack(context) {
   }
 
   await Promise.all([
-    pruneDirectory(path.join(bundledResources, "python")),
-    pruneDirectory(path.join(bundledResources, "models", "faster-whisper"))
+    pruneDirectory(path.join(bundledResources, "python"))
   ]);
 };

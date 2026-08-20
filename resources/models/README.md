@@ -1,18 +1,15 @@
-Place local Whisper model files here for development or private builds.
+This directory is only for local development and legacy private builds.
 
-The public installer includes `ggml-small.bin` so the Whisper.cpp engine works
-out of the box. Users can still select a larger external `ggml` / `gguf` model
-from DeskScribe settings when they want higher accuracy.
+Public installers do not bundle speech models. DeskScribe downloads managed
+models on demand to Electron's `userData/models` directory, verifies them, and
+keeps them independent from application updates.
 
-Bundled Whisper.cpp model:
-- `ggml-small.bin`
+Managed models:
 
-Faster-Whisper uses the bundled CTranslate2 model at:
-- `faster-whisper/distil-large-v3/model.bin`
+- Faster-Whisper `large-v3-turbo`: default for Chinese, English, and mixed audio.
+- Faster-Whisper `distil-large-v3`: English-only low-latency alternative.
+- Whisper.cpp `ggml-small.bin`: lightweight multilingual alternative.
+- Whisper.cpp `ggml-large-v3-q5_0.bin`: higher-accuracy quantized alternative.
 
-Do not remove this directory from release builds; Faster-Whisper runs offline
-and does not download models at runtime.
-
-Recommended:
-- `ggml-large-v3.bin`
-- or a quantized `large-v3` variant for lower-memory devices
+Users can also select an external `.bin` or `.gguf` file without copying it into
+the managed model directory.

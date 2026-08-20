@@ -28,20 +28,6 @@ const pythonPath = isWindows
   : fs.existsSync(portablePythonPath)
     ? portablePythonPath
     : environmentPythonPath;
-const fasterWhisperModelPath = path.join(
-  projectRoot,
-  "resources",
-  "models",
-  "faster-whisper",
-  "distil-large-v3",
-  "model.bin"
-);
-const whisperCppModelPath = path.join(
-  projectRoot,
-  "resources",
-  "models",
-  "ggml-small.bin"
-);
 const appIconPath = path.join(
   projectRoot,
   "resources",
@@ -66,12 +52,6 @@ if (!fs.existsSync(whisperPath)) {
 
 console.log(`Verified bundled whisper.cpp CLI: ${whisperPath}`);
 
-if (!fs.existsSync(whisperCppModelPath)) {
-  throw new Error(`Bundled whisper.cpp model was not found: ${whisperCppModelPath}`);
-}
-
-console.log(`Verified bundled whisper.cpp model: ${whisperCppModelPath}`);
-
 if (!fs.existsSync(pythonPath)) {
   throw new Error(`Bundled Faster-Whisper Python runtime was not found: ${pythonPath}`);
 }
@@ -93,12 +73,6 @@ if (isWindows) {
 }
 
 console.log(`Verified bundled Faster-Whisper Python runtime: ${pythonPath}`);
-
-if (!fs.existsSync(fasterWhisperModelPath)) {
-  throw new Error(`Bundled Faster-Whisper model was not found: ${fasterWhisperModelPath}`);
-}
-
-console.log(`Verified bundled Faster-Whisper model: ${fasterWhisperModelPath}`);
 
 if (!fs.existsSync(appIconPath)) {
   throw new Error(`Application icon was not found for ${process.platform}: ${appIconPath}`);

@@ -1,5 +1,15 @@
 import { BrowserWindow, dialog, ipcMain, shell } from "electron";
+import fs from "node:fs/promises";
 import path from "node:path";
+import {
+  cancelManagedModelDownload,
+  deleteManagedModel,
+  downloadManagedModel,
+  getManagedModels,
+  getModelsRoot,
+  isManagedModelId
+} from "./model-manager";
+import { checkForUpdates, getUpdateState, installDownloadedUpdate } from "./updater";
 import {
   TranscriptionController,
   exportRecordingAudio,
@@ -11,6 +21,7 @@ import {
 import { loadPreferences, savePreferences } from "./preferences";
 import type {
   AppPreferences,
+  ManagedModelId,
   ExportFormat,
   RecordingAudioExportRequest,
   RecordingTranscriptionRequest,
@@ -30,6 +41,30 @@ function audioFilters() {
 }
 
 let activeTranscription: TranscriptionController | null = null;
+
+function assertTrustedSender(event: Electron.IpcMainInvokeEvent) {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (!window || window.isDestroyed()) {
+    throw new Error("Rejected IPC request from an unknown window.");
+  }
+  const senderUrl = event.senderFrame?.url;
+  if (!senderUrl) {
+    throw new Error("Rejected IPC request without a sender frame.");
+  }
+  const trusted = process.env.VITE_DEV_SERVER_URL
+    ? senderUrl.startsWith(process.env.VITE_DEV_SERVER_URL)
+    : senderUrl.startsWith("file://");
+  if (!trusted) {
+    throw new Error("Rejected IPC request from an untrusted page.");
+  }
+}
+
+function managedModelId(value: unknown): ManagedModelId {
+  if (!isManagedModelId(value)) {
+    throw new Error("Invalid managed model identifier.");
+  }
+  return value;
+}
 
 function createProgressReporter(event: Electron.IpcMainInvokeEvent) {
   return (progress: TranscriptionProgressEvent) => {
@@ -128,6 +163,54 @@ export function registerIpc(handlers: IpcHandlers = {}) {
       properties: ["openDirectory", "createDirectory"]
     });
     return result.canceled ? null : result.filePaths[0] ?? null;
+  });
+
+  ipcMain.handle("models:list", async (event) => {
+    assertTrustedSender(event);
+    return getManagedModels();
+  });
+
+  ipcMain.handle("models:download", async (event, value: unknown) => {
+    assertTrustedSender(event);
+    const modelId = managedModelId(value);
+    await downloadManagedModel(modelId, (progress) => {
+      if (!event.sender.isDestroyed()) {
+        event.sender.send("models:download-progress", progress);
+      }
+    });
+  });
+
+  ipcMain.handle("models:cancel-download", (event, value: unknown) => {
+    assertTrustedSender(event);
+    return cancelManagedModelDownload(managedModelId(value));
+  });
+
+  ipcMain.handle("models:delete", async (event, value: unknown) => {
+    assertTrustedSender(event);
+    await deleteManagedModel(managedModelId(value));
+  });
+
+  ipcMain.handle("models:open-directory", async (event) => {
+    assertTrustedSender(event);
+    const modelsRoot = getModelsRoot();
+    await fs.mkdir(modelsRoot, { recursive: true });
+    const error = await shell.openPath(modelsRoot);
+    if (error) throw new Error(error);
+  });
+
+  ipcMain.handle("update:get-state", (event) => {
+    assertTrustedSender(event);
+    return getUpdateState();
+  });
+
+  ipcMain.handle("update:check", async (event) => {
+    assertTrustedSender(event);
+    return checkForUpdates();
+  });
+
+  ipcMain.handle("update:install", (event) => {
+    assertTrustedSender(event);
+    installDownloadedUpdate();
   });
 
   ipcMain.handle("transcription:recording", async (event, input: RecordingTranscriptionRequest) => {

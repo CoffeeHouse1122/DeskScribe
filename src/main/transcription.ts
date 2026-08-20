@@ -10,6 +10,11 @@ import {
   sanitizeBaseName,
   uniqueId
 } from "./file-utils";
+import {
+  fasterWhisperManagedModelId,
+  resolveManagedModelPath,
+  whisperCppManagedModelId
+} from "./model-manager";
 import type {
   AppPreferences,
   ExportFormat,
@@ -38,7 +43,6 @@ const WHISPER_BALANCED_CHUNK_SECONDS = 180;
 const WHISPER_QUANTIZED_CHUNK_SECONDS = 600;
 const WHISPER_GPU_CHUNK_SECONDS = 900;
 const WHISPER_MAX_AUTO_THREADS = 12;
-const BUNDLED_FASTER_WHISPER_MODEL = "distil-large-v3";
 const traditionalToSimplified = OpenCC.Converter({ from: "t", to: "cn" });
 
 export class TranscriptionCancelledError extends Error {
@@ -163,7 +167,14 @@ async function resolveModelPath(preferences: AppPreferences, logs: string[]) {
       pushLog(logs, `Using preferred Whisper model: ${preferredModelPath}`);
       return preferredModelPath;
     }
-    pushLog(logs, `Preferred Whisper model missing, falling back to bundled model: ${preferredModelPath}`);
+    pushLog(logs, `Preferred Whisper model missing, falling back to managed model: ${preferredModelPath}`);
+  }
+
+  const managedModelId = whisperCppManagedModelId(preferences.whisperCppModel);
+  const managedModelPath = await resolveManagedModelPath(managedModelId);
+  if (managedModelPath) {
+    pushLog(logs, `Using managed Whisper model: ${managedModelPath}`);
+    return managedModelPath;
   }
 
   const builtInModelPath = await findBundledModel();
@@ -268,15 +279,6 @@ function pythonCandidates() {
     ...resourcePathCandidates("python", scriptsDir, windowsPython),
     ...(process.platform === "win32" ? ["python.exe", "python"] : ["python3", "python"])
   ]);
-}
-
-async function findBundledFasterWhisperModelDir() {
-  for (const candidate of resourcePathCandidates("models", "faster-whisper")) {
-    if (await exists(candidate)) {
-      return candidate;
-    }
-  }
-  return "";
 }
 
 function pushLog(logs: string[], line: string) {
@@ -1318,14 +1320,16 @@ async function runFasterWhisper(
 
   report?.({ stage: "transcribing", message: "正在启动 Faster-Whisper 加速引擎", progress: 56 });
   const outputPath = path.join(tempDir, "transcript-faster-whisper.json");
-  const modelDir = await findBundledFasterWhisperModelDir();
+  const modelName = preferences.fasterWhisperModel;
+  const modelId = fasterWhisperManagedModelId(modelName);
+  const modelDir = await resolveManagedModelPath(modelId);
   if (!modelDir) {
-    throw new Error("Unable to locate bundled Faster-Whisper models. Reinstall DeskScribe with resources/models/faster-whisper.");
+    throw new Error(`MODEL_NOT_INSTALLED:${modelId}`);
   }
   const config: FasterWorkerConfig = {
     runnerPath,
     modelDir,
-    modelName: BUNDLED_FASTER_WHISPER_MODEL,
+    modelName,
     device: preferences.disableGpu ? "cpu" : "auto",
     computeType: preferences.disableGpu ? "int8" : "auto",
     cpuThreads: whisperThreadCount(preferences),
@@ -1348,7 +1352,7 @@ async function runFasterWhisper(
   );
   await fs.writeFile(outputPath, JSON.stringify(result, null, 2), "utf8");
   const raw = await fs.readFile(outputPath, "utf8");
-  const document = parseTranscriptJsonOutput(raw, sourceType, fileName, language, BUNDLED_FASTER_WHISPER_MODEL);
+  const document = parseTranscriptJsonOutput(raw, sourceType, fileName, language, modelName);
   pushLog(logs, `Transcribed with faster-whisper via ${path.basename(executable)}`);
   return { document, outputPath };
 }
@@ -1417,9 +1421,7 @@ async function runWhisper(
   const modelPath = await resolveModelPath(preferences, logs);
 
   if (!modelPath) {
-    throw new Error(
-      "No bundled Whisper model was found. Rebuild or reinstall DeskScribe so resources/models contains a ggml or gguf model."
-    );
+    throw new Error(`MODEL_NOT_INSTALLED:${whisperCppManagedModelId(preferences.whisperCppModel)}`);
   }
 
   pushLog(

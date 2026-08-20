@@ -66,7 +66,11 @@ def audio_rms(path: str) -> int:
 
 def resolve_model(model_name: str, model_dir: str | None) -> str:
     if not model_dir:
-        raise RuntimeError("Missing bundled Faster-Whisper model directory.")
+        raise RuntimeError("Missing Faster-Whisper model directory.")
+
+    direct_model = os.path.join(model_dir, "model.bin")
+    if os.path.exists(direct_model):
+        return model_dir
 
     target_dir = os.path.join(model_dir, model_name)
     model_bin = os.path.join(target_dir, "model.bin")
@@ -74,7 +78,7 @@ def resolve_model(model_name: str, model_dir: str | None) -> str:
         return target_dir
 
     raise RuntimeError(
-        f"Bundled Faster-Whisper model is missing model.bin: {target_dir}"
+        f"Faster-Whisper model is missing model.bin: {target_dir}"
     )
 
 

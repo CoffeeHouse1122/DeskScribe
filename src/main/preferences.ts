@@ -1,7 +1,7 @@
 import { app } from "electron";
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { AppPreferences } from "../shared/types";
+import type { AppPreferences, FasterWhisperModel, TranscriptionEngine, WhisperCppModel } from "../shared/types";
 
 const SETTINGS_FILE = "preferences.json";
 
@@ -15,9 +15,33 @@ export function getDefaultPreferences(): AppPreferences {
     ffmpegExecutablePath: "",
     modelPath: "",
     disableGpu: true,
-    transcriptionEngine: "whisper-cpp",
-    fasterWhisperModel: "distil-large-v3",
+    transcriptionEngine: "faster-whisper",
+    whisperCppModel: "ggml-small",
+    fasterWhisperModel: "large-v3-turbo",
     whisperThreads: 4
+  };
+}
+
+function transcriptionEngine(value: unknown): TranscriptionEngine {
+  return value === "whisper-cpp" || value === "faster-whisper" ? value : "faster-whisper";
+}
+
+function whisperCppModel(value: unknown): WhisperCppModel {
+  return value === "ggml-large-v3-q5_0" ? value : "ggml-small";
+}
+
+function fasterWhisperModel(value: unknown): FasterWhisperModel {
+  return value === "distil-large-v3" ? value : "large-v3-turbo";
+}
+
+function normalizePreferences(value: Partial<AppPreferences>): AppPreferences {
+  const defaults = getDefaultPreferences();
+  return {
+    ...defaults,
+    ...value,
+    transcriptionEngine: transcriptionEngine(value.transcriptionEngine),
+    whisperCppModel: whisperCppModel(value.whisperCppModel),
+    fasterWhisperModel: fasterWhisperModel(value.fasterWhisperModel)
   };
 }
 
@@ -30,14 +54,14 @@ export async function loadPreferences() {
   try {
     const raw = await fs.readFile(settingsPath(), "utf8");
     const parsed = JSON.parse(raw) as Partial<AppPreferences>;
-    return { ...defaults, ...parsed };
+    return normalizePreferences(parsed);
   } catch {
     return defaults;
   }
 }
 
 export async function savePreferences(next: AppPreferences) {
-  const merged = { ...getDefaultPreferences(), ...next };
+  const merged = normalizePreferences(next);
   await fs.mkdir(app.getPath("userData"), { recursive: true });
   await fs.writeFile(settingsPath(), JSON.stringify(merged, null, 2), "utf8");
   return merged;

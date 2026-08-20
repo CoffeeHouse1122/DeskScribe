@@ -4,7 +4,13 @@ export type TranscriptLanguage = "auto" | "zh" | "en";
 export type ExportFormat = "txt" | "srt" | "json";
 export type TranscriptionStage = "queued" | "normalizing" | "transcribing" | "finalizing" | "completed" | "failed" | "cancelled";
 export type TranscriptionEngine = "whisper-cpp" | "faster-whisper";
-export type FasterWhisperModel = "distil-large-v3" | "large-v3" | "small";
+export type FasterWhisperModel = "large-v3-turbo" | "distil-large-v3";
+export type WhisperCppModel = "ggml-small" | "ggml-large-v3-q5_0";
+export type ManagedModelId =
+  | "whisper-cpp-small"
+  | "whisper-cpp-large-v3-q5_0"
+  | "faster-whisper-large-v3-turbo"
+  | "faster-whisper-distil-large-v3";
 export type WindowMode = "compact" | "full";
 
 export interface AppPreferences {
@@ -17,8 +23,52 @@ export interface AppPreferences {
   modelPath: string;
   disableGpu: boolean;
   transcriptionEngine: TranscriptionEngine;
+  whisperCppModel: WhisperCppModel;
   fasterWhisperModel: FasterWhisperModel;
   whisperThreads: number;
+}
+
+export interface ManagedModelInfo {
+  id: ManagedModelId;
+  engine: TranscriptionEngine;
+  modelName: WhisperCppModel | FasterWhisperModel;
+  displayName: string;
+  description: string;
+  hardwareHint: string;
+  languageHint: string;
+  sizeBytes: number;
+  installed: boolean;
+  recommended: boolean;
+  installationPath: string;
+}
+
+export type ModelDownloadPhase = "downloading" | "verifying" | "completed" | "cancelled" | "failed";
+
+export interface ModelDownloadProgress {
+  modelId: ManagedModelId;
+  phase: ModelDownloadPhase;
+  transferredBytes: number;
+  totalBytes: number;
+  percent: number;
+  message: string;
+}
+
+export type UpdatePhase =
+  | "disabled"
+  | "idle"
+  | "checking"
+  | "available"
+  | "downloading"
+  | "downloaded"
+  | "not-available"
+  | "error";
+
+export interface AppUpdateState {
+  phase: UpdatePhase;
+  currentVersion: string;
+  availableVersion?: string;
+  percent?: number;
+  message: string;
 }
 
 export interface TranscriptSegment {
@@ -91,6 +141,16 @@ export interface RendererApi {
   selectFfmpegExecutable(): Promise<string | null>;
   selectModelFile(): Promise<string | null>;
   selectExportDirectory(): Promise<string | null>;
+  getManagedModels(): Promise<ManagedModelInfo[]>;
+  downloadManagedModel(modelId: ManagedModelId): Promise<void>;
+  cancelManagedModelDownload(modelId: ManagedModelId): Promise<boolean>;
+  deleteManagedModel(modelId: ManagedModelId): Promise<void>;
+  openModelsDirectory(): Promise<void>;
+  onModelDownloadProgress(callback: (progress: ModelDownloadProgress) => void): () => void;
+  getUpdateState(): Promise<AppUpdateState>;
+  checkForUpdates(): Promise<AppUpdateState>;
+  installUpdate(): Promise<void>;
+  onUpdateState(callback: (state: AppUpdateState) => void): () => void;
   transcribeRecording(input: RecordingTranscriptionRequest): Promise<TranscriptionResult>;
   transcribeFile(filePath: string, language: TranscriptLanguage): Promise<TranscriptionResult>;
   cancelTranscription(): Promise<boolean>;

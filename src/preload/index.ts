@@ -1,7 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
   AppPreferences,
+  AppUpdateState,
   ExportFormat,
+  ManagedModelId,
+  ManagedModelInfo,
+  ModelDownloadProgress,
   RecordingAudioExportRequest,
   RecordingTranscriptionRequest,
   RendererApi,
@@ -25,6 +29,24 @@ const api: RendererApi = {
   selectFfmpegExecutable: () => ipcRenderer.invoke("dialog:ffmpeg-file"),
   selectModelFile: () => ipcRenderer.invoke("dialog:model-file"),
   selectExportDirectory: () => ipcRenderer.invoke("dialog:export-directory"),
+  getManagedModels: () => ipcRenderer.invoke("models:list") as Promise<ManagedModelInfo[]>,
+  downloadManagedModel: (modelId: ManagedModelId) => ipcRenderer.invoke("models:download", modelId),
+  cancelManagedModelDownload: (modelId: ManagedModelId) => ipcRenderer.invoke("models:cancel-download", modelId),
+  deleteManagedModel: (modelId: ManagedModelId) => ipcRenderer.invoke("models:delete", modelId),
+  openModelsDirectory: () => ipcRenderer.invoke("models:open-directory"),
+  onModelDownloadProgress: (callback: (progress: ModelDownloadProgress) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, progress: ModelDownloadProgress) => callback(progress);
+    ipcRenderer.on("models:download-progress", listener);
+    return () => ipcRenderer.removeListener("models:download-progress", listener);
+  },
+  getUpdateState: () => ipcRenderer.invoke("update:get-state") as Promise<AppUpdateState>,
+  checkForUpdates: () => ipcRenderer.invoke("update:check") as Promise<AppUpdateState>,
+  installUpdate: () => ipcRenderer.invoke("update:install"),
+  onUpdateState: (callback: (state: AppUpdateState) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, state: AppUpdateState) => callback(state);
+    ipcRenderer.on("update:state", listener);
+    return () => ipcRenderer.removeListener("update:state", listener);
+  },
   transcribeRecording: (input: RecordingTranscriptionRequest) => ipcRenderer.invoke("transcription:recording", input),
   transcribeFile: (filePath: string, language: TranscriptLanguage) => ipcRenderer.invoke("transcription:file", filePath, language),
   cancelTranscription: () => ipcRenderer.invoke("transcription:cancel"),

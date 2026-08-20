@@ -1,6 +1,10 @@
 import type {
   AppPreferences,
+  AppUpdateState,
   ExportFormat,
+  ManagedModelId,
+  ManagedModelInfo,
+  ModelDownloadProgress,
   RecordingAudioExportRequest,
   TranscriptDocument,
   TranscriptLanguage,
@@ -12,7 +16,6 @@ import type {
 
 type RecorderState = "idle" | "recording" | "paused" | "processing";
 type RecordingAudioSource = "microphone" | "system" | "microphone-system";
-type EngineModelSelection = "whisper-cpp" | "distil-large-v3";
 
 const LIVE_TRANSCRIPTION_INTERVAL_MS = 8000;
 const LIVE_TRANSCRIPTION_MIN_SECONDS = 3;
@@ -28,8 +31,9 @@ const defaultPreferences: AppPreferences = {
   ffmpegExecutablePath: "",
   modelPath: "",
   disableGpu: true,
-  transcriptionEngine: "whisper-cpp",
-  fasterWhisperModel: "distil-large-v3",
+  transcriptionEngine: "faster-whisper",
+  whisperCppModel: "ggml-small",
+  fasterWhisperModel: "large-v3-turbo",
   whisperThreads: 4
 };
 
@@ -191,6 +195,19 @@ export function mountApp(root: HTMLDivElement) {
             <button id="close-settings" class="ghost-button icon-text-button" type="button"><i class="ri-close-line" aria-hidden="true"></i><span>关闭</span></button>
           </div>
 
+          <section class="update-card" aria-labelledby="update-title">
+            <div class="update-copy">
+              <span class="section-kicker">应用更新</span>
+              <strong id="update-title">DeskScribe <span id="current-version">—</span></strong>
+              <span id="update-message">正在读取版本信息</span>
+            </div>
+            <div class="update-actions">
+              <button id="check-update" class="ghost-button icon-text-button" type="button"><i class="ri-refresh-line" aria-hidden="true"></i><span>检查</span></button>
+              <button id="install-update" class="primary-button icon-text-button" type="button" hidden><i class="ri-restart-line" aria-hidden="true"></i><span>重启安装</span></button>
+            </div>
+            <div id="update-progress-track" class="mini-progress" hidden><span id="update-progress"></span></div>
+          </section>
+
           <div class="settings-grid">
             <label class="field">
               <span>主题</span>
@@ -238,28 +255,14 @@ export function mountApp(root: HTMLDivElement) {
 
             <label class="field">
               <span>转写引擎</span>
-              <div id="transcription-engine-select" class="custom-select" data-value="whisper-cpp">
+              <div id="transcription-engine-select" class="custom-select" data-value="faster-whisper">
                 <button class="select-button" type="button" aria-haspopup="listbox" aria-expanded="false">
-                  <span class="select-label">Whisper.cpp 稳定</span>
+                  <span class="select-label">Faster-Whisper 加速</span>
                   <i class="ri-arrow-down-s-line" aria-hidden="true"></i>
                 </button>
                 <div class="select-menu" role="listbox" hidden>
                   <button type="button" role="option" data-value="whisper-cpp">Whisper.cpp 稳定</button>
                   <button type="button" role="option" data-value="faster-whisper">Faster-Whisper 加速</button>
-                </div>
-              </div>
-            </label>
-
-            <label class="field">
-              <span>加速模型</span>
-              <div id="faster-model-select" class="custom-select" data-value="distil-large-v3">
-                <button class="select-button" type="button" aria-haspopup="listbox" aria-expanded="false">
-                  <span class="select-label">distil-large-v3</span>
-                  <i class="ri-arrow-down-s-line" aria-hidden="true"></i>
-                </button>
-                <div class="select-menu" role="listbox" hidden>
-                  <button type="button" role="option" data-value="whisper-cpp">Whisper.cpp 模型</button>
-                  <button type="button" role="option" data-value="distil-large-v3">distil-large-v3 模型</button>
                 </div>
               </div>
             </label>
@@ -275,6 +278,20 @@ export function mountApp(root: HTMLDivElement) {
             </label>
           </div>
 
+          <section class="model-library" aria-labelledby="model-library-title">
+            <div class="model-library-head">
+              <div>
+                <span class="section-kicker">按需下载 · 更新保留</span>
+                <h3 id="model-library-title">本地模型库</h3>
+              </div>
+              <button id="open-models-directory" class="ghost-button icon-only-button" type="button" title="打开模型目录" aria-label="打开模型目录"><i class="ri-folder-open-line" aria-hidden="true"></i></button>
+            </div>
+            <p class="model-library-note">模型独立保存在用户数据目录。应用升级不会重复下载，也不会覆盖已安装模型。</p>
+            <div id="model-list" class="model-list" aria-live="polite">
+              <p class="muted">正在读取模型状态…</p>
+            </div>
+          </section>
+
           <div class="path-stack">
             <div class="path-field path-field-with-clear">
               <label class="field field-block">
@@ -287,11 +304,11 @@ export function mountApp(root: HTMLDivElement) {
 
             <div class="path-field path-field-with-clear">
               <label class="field field-block">
-                <span>转写模型</span>
-                <input id="model-path-input" type="text" readonly placeholder="默认使用内置模型，可选择量化 large-v3 模型" />
+                <span>外部 Whisper.cpp 模型</span>
+                <input id="model-path-input" type="text" readonly placeholder="可直接使用本地 .bin / .gguf 文件" />
               </label>
               <button id="pick-model-file" class="ghost-button icon-only-button" type="button" title="选择 Whisper 模型" aria-label="选择 Whisper 模型"><i class="ri-cpu-line" aria-hidden="true"></i></button>
-              <button id="clear-model-file" class="ghost-button icon-only-button" type="button" title="清空并使用内置模型" aria-label="清空并使用内置模型"><i class="ri-close-circle-line" aria-hidden="true"></i></button>
+              <button id="clear-model-file" class="ghost-button icon-only-button" type="button" title="清空并使用模型库" aria-label="清空并使用模型库"><i class="ri-close-circle-line" aria-hidden="true"></i></button>
             </div>
 
             <div class="path-field">
@@ -319,6 +336,12 @@ export function mountApp(root: HTMLDivElement) {
     maximizeWindow: root.querySelector<HTMLButtonElement>("#maximize-window")!,
     closeWindow: root.querySelector<HTMLButtonElement>("#close-window")!,
     closeSettings: root.querySelector<HTMLButtonElement>("#close-settings")!,
+    currentVersion: root.querySelector<HTMLSpanElement>("#current-version")!,
+    updateMessage: root.querySelector<HTMLSpanElement>("#update-message")!,
+    checkUpdate: root.querySelector<HTMLButtonElement>("#check-update")!,
+    installUpdate: root.querySelector<HTMLButtonElement>("#install-update")!,
+    updateProgressTrack: root.querySelector<HTMLElement>("#update-progress-track")!,
+    updateProgress: root.querySelector<HTMLElement>("#update-progress")!,
     statePill: root.querySelector<HTMLSpanElement>("#recording-state")!,
     elapsed: root.querySelector<HTMLDivElement>("#elapsed")!,
     levelMeter: root.querySelector<HTMLDivElement>("#level-meter")!,
@@ -347,7 +370,6 @@ export function mountApp(root: HTMLDivElement) {
     closeBehaviorSelect: root.querySelector<HTMLElement>("#close-behavior-select")!,
     defaultLanguageSelect: root.querySelector<HTMLElement>("#default-language-select")!,
     transcriptionEngineSelect: root.querySelector<HTMLElement>("#transcription-engine-select")!,
-    fasterModelSelect: root.querySelector<HTMLElement>("#faster-model-select")!,
     disableGpuCheckbox: root.querySelector<HTMLInputElement>("#disable-gpu-checkbox")!,
     whisperThreadsInput: root.querySelector<HTMLInputElement>("#whisper-threads-input")!,
     whisperExecutableInput: root.querySelector<HTMLInputElement>("#whisper-executable-input")!,
@@ -356,11 +378,21 @@ export function mountApp(root: HTMLDivElement) {
     modelPathInput: root.querySelector<HTMLInputElement>("#model-path-input")!,
     pickModelFile: root.querySelector<HTMLButtonElement>("#pick-model-file")!,
     clearModelFile: root.querySelector<HTMLButtonElement>("#clear-model-file")!,
+    modelList: root.querySelector<HTMLElement>("#model-list")!,
+    openModelsDirectory: root.querySelector<HTMLButtonElement>("#open-models-directory")!,
     exportDirectoryInput: root.querySelector<HTMLInputElement>("#export-directory-input")!,
     pickExportDirectory: root.querySelector<HTMLButtonElement>("#pick-export-directory")!
   };
 
   let preferences = { ...defaultPreferences };
+  let managedModels: ManagedModelInfo[] = [];
+  const modelDownloadProgress = new Map<ManagedModelId, ModelDownloadProgress>();
+  let pendingDeleteModelId: ManagedModelId | null = null;
+  let updateState: AppUpdateState = {
+    phase: "idle",
+    currentVersion: "",
+    message: "尚未检查更新"
+  };
   let windowMode: WindowMode = "compact";
   let recorderState: RecorderState = "idle";
   let selectedFilePath = "";
@@ -552,8 +584,15 @@ export function mountApp(root: HTMLDivElement) {
     syncRecorderProcessState(next);
   }
 
-  function engineModelSelectionFromPreferences(): EngineModelSelection {
-    return preferences.transcriptionEngine === "faster-whisper" ? "distil-large-v3" : "whisper-cpp";
+  function selectedManagedModelId() {
+    if (preferences.transcriptionEngine === "faster-whisper") {
+      return preferences.fasterWhisperModel === "distil-large-v3"
+        ? "faster-whisper-distil-large-v3"
+        : "faster-whisper-large-v3-turbo";
+    }
+    return preferences.whisperCppModel === "ggml-large-v3-q5_0"
+      ? "whisper-cpp-large-v3-q5_0"
+      : "whisper-cpp-small";
   }
 
   function syncPreferencesToUi() {
@@ -561,7 +600,6 @@ export function mountApp(root: HTMLDivElement) {
     setCustomSelectValue(refs.closeBehaviorSelect, preferences.closeBehavior, true);
     setCustomSelectValue(refs.defaultLanguageSelect, preferences.defaultLanguage, true);
     setCustomSelectValue(refs.transcriptionEngineSelect, preferences.transcriptionEngine, true);
-    setCustomSelectValue(refs.fasterModelSelect, engineModelSelectionFromPreferences(), true);
     refs.disableGpuCheckbox.checked = preferences.disableGpu;
     refs.whisperThreadsInput.max = String(Math.max(1, navigator.hardwareConcurrency || 4));
     refs.whisperThreadsInput.value = String(Math.max(0, Math.min(preferences.whisperThreads || 0, Number(refs.whisperThreadsInput.max))));
@@ -572,11 +610,88 @@ export function mountApp(root: HTMLDivElement) {
     refs.exportDirectoryInput.value = preferences.exportDirectory;
     setCustomSelectValue(refs.languageSelect, preferences.defaultLanguage, true);
     applyTheme(preferences.theme);
+    renderModelLibrary();
   }
 
   async function persistPreferences() {
     preferences = await window.deskScribe.savePreferences(preferences);
     syncPreferencesToUi();
+  }
+
+  function formatBytes(bytes: number) {
+    if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+    return `${Math.round(bytes / 1024 ** 2)} MB`;
+  }
+
+  function renderModelLibrary() {
+    if (managedModels.length === 0) {
+      refs.modelList.innerHTML = '<p class="muted">暂无可用模型信息。</p>';
+      return;
+    }
+    const selectedId = selectedManagedModelId();
+    refs.modelList.innerHTML = managedModels.map((model) => {
+      const progress = modelDownloadProgress.get(model.id);
+      const active = progress && (progress.phase === "downloading" || progress.phase === "verifying");
+      const selected = model.id === selectedId && (model.engine !== "whisper-cpp" || !preferences.modelPath);
+      const deletePending = pendingDeleteModelId === model.id;
+      const action = active
+        ? `<button class="ghost-button model-action" data-model-action="cancel" data-model-id="${model.id}" type="button">暂停</button>`
+        : model.installed
+          ? `<button class="${selected ? "ghost-button" : "primary-button"} model-action" data-model-action="use" data-model-id="${model.id}" type="button" ${selected ? "disabled" : ""}>${selected ? "当前使用" : "使用"}</button>
+             <button class="ghost-button icon-only-button model-delete" data-model-action="delete" data-model-id="${model.id}" type="button" title="${deletePending ? "再次点击确认删除" : "删除模型"}" aria-label="${deletePending ? "再次点击确认删除" : "删除模型"}"><i class="${deletePending ? "ri-error-warning-line" : "ri-delete-bin-6-line"}" aria-hidden="true"></i></button>`
+          : `<button class="primary-button model-action" data-model-action="download" data-model-id="${model.id}" type="button"><i class="ri-download-cloud-2-line" aria-hidden="true"></i>下载</button>`;
+      const progressMarkup = progress
+        ? `<div class="model-progress ${progress.phase}"><div><span>${escapeHtml(progress.message)}</span><strong>${progress.percent.toFixed(1)}%</strong></div><div class="mini-progress"><span style="width:${progress.percent}%"></span></div></div>`
+        : "";
+      return `
+        <article class="model-card ${selected ? "is-selected" : ""}" data-model-id="${model.id}">
+          <div class="model-card-top">
+            <div class="model-title-row">
+              <strong>${escapeHtml(model.displayName)}</strong>
+              ${model.recommended ? '<span class="model-badge recommended">默认推荐</span>' : ""}
+              <span class="model-badge ${model.installed ? "installed" : ""}">${model.installed ? "已安装" : formatBytes(model.sizeBytes)}</span>
+            </div>
+            <span class="model-language">${escapeHtml(model.languageHint)}</span>
+          </div>
+          <p>${escapeHtml(model.description)}</p>
+          <div class="model-card-foot">
+            <span><i class="ri-cpu-line" aria-hidden="true"></i>${escapeHtml(model.hardwareHint)}</span>
+            <div class="model-card-actions">${action}</div>
+          </div>
+          ${progressMarkup}
+        </article>`;
+    }).join("");
+  }
+
+  async function refreshManagedModels() {
+    try {
+      managedModels = await window.deskScribe.getManagedModels();
+      renderModelLibrary();
+    } catch (error) {
+      refs.modelList.innerHTML = `<p class="model-error">${escapeHtml(normalizeErrorMessage(error))}</p>`;
+    }
+  }
+
+  function renderUpdateState() {
+    refs.currentVersion.textContent = updateState.currentVersion ? `v${updateState.currentVersion}` : "—";
+    refs.updateMessage.textContent = updateState.message;
+    refs.checkUpdate.disabled = updateState.phase === "checking" || updateState.phase === "downloading";
+    refs.installUpdate.hidden = updateState.phase !== "downloaded";
+    const showProgress = updateState.phase === "available" || updateState.phase === "downloading" || updateState.phase === "downloaded";
+    refs.updateProgressTrack.hidden = !showProgress;
+    refs.updateProgress.style.width = `${updateState.percent ?? 0}%`;
+  }
+
+  async function applyModelSelection(model: ManagedModelInfo) {
+    preferences.transcriptionEngine = model.engine;
+    if (model.engine === "faster-whisper") {
+      preferences.fasterWhisperModel = model.modelName === "distil-large-v3" ? "distil-large-v3" : "large-v3-turbo";
+    } else {
+      preferences.whisperCppModel = model.modelName === "ggml-large-v3-q5_0" ? "ggml-large-v3-q5_0" : "ggml-small";
+      preferences.modelPath = "";
+    }
+    await persistPreferences();
+    setStatus(`已切换到 ${model.displayName}。`);
   }
 
   function renderTranscript(document: TranscriptDocument | null) {
@@ -601,8 +716,17 @@ export function mountApp(root: HTMLDivElement) {
     const raw = error instanceof Error ? error.message : String(error);
     const stripped = raw.replace(/^Error invoking remote method '[^']+': Error:\s*/i, "");
 
-    if (/No bundled Whisper model/i.test(stripped)) {
-      return "未找到内置 Whisper 模型。请重新构建或安装包含 resources/models 的 DeskScribe。";
+    if (/MODEL_NOT_INSTALLED:faster-whisper-large-v3-turbo/i.test(stripped)) {
+      return "尚未安装默认的 Large V3 Turbo 模型，请在设置的模型库中下载。";
+    }
+    if (/MODEL_NOT_INSTALLED:faster-whisper-distil-large-v3/i.test(stripped)) {
+      return "尚未安装 Distil Large V3 模型，请在设置的模型库中下载。";
+    }
+    if (/MODEL_NOT_INSTALLED:whisper-cpp-large-v3-q5_0/i.test(stripped)) {
+      return "尚未安装 Large V3 Q5_0 模型，请在设置的模型库中下载。";
+    }
+    if (/MODEL_NOT_INSTALLED:whisper-cpp-small/i.test(stripped)) {
+      return "尚未安装 Whisper Small 模型，请在设置的模型库中下载。";
     }
     if (/Unable to locate bundled whisper\.cpp CLI/i.test(stripped)) {
       return "未找到内置 whisper-cli。请重新构建或安装包含 resources/bin/Release 的 DeskScribe。";
@@ -684,9 +808,13 @@ export function mountApp(root: HTMLDivElement) {
       setStatus(`转写完成，检测语言：${result.document.engine.detectedLanguage || result.document.source.language}`);
       refs.exportPath.textContent = result.outputPath;
     } catch (error) {
+      const missingModel = /MODEL_NOT_INSTALLED:/i.test(error instanceof Error ? error.message : String(error));
       const message = normalizeErrorMessage(error);
       applyTranscriptionProgress({ stage: message === "已取消转写。" ? "cancelled" : "failed", message, progress: 100 });
       setStatus(message);
+      if (missingModel) {
+        openSettings(true);
+      }
     } finally {
       isTranscribing = false;
       refs.cancelTranscription.disabled = true;
@@ -1223,6 +1351,13 @@ export function mountApp(root: HTMLDivElement) {
   function openSettings(open: boolean) {
     refs.settingsPanel.hidden = !open;
     document.body.classList.toggle("settings-open", open);
+    if (open) {
+      void refreshManagedModels();
+      void window.deskScribe.getUpdateState().then((next) => {
+        updateState = next;
+        renderUpdateState();
+      });
+    }
   }
 
   async function bindPicker(
@@ -1241,7 +1376,6 @@ export function mountApp(root: HTMLDivElement) {
     refs.closeBehaviorSelect,
     refs.defaultLanguageSelect,
     refs.transcriptionEngineSelect,
-    refs.fasterModelSelect,
     refs.recordingSourceSelect
   ].forEach(bindCustomSelect);
 
@@ -1282,6 +1416,75 @@ export function mountApp(root: HTMLDivElement) {
   });
   refs.closeWindow.addEventListener("click", () => {
     void window.deskScribe.closeWindow();
+  });
+
+  refs.checkUpdate.addEventListener("click", () => {
+    void window.deskScribe.checkForUpdates().then((next) => {
+      updateState = next;
+      renderUpdateState();
+    }).catch((error) => {
+      updateState = { ...updateState, phase: "error", message: normalizeErrorMessage(error) };
+      renderUpdateState();
+    });
+  });
+  refs.installUpdate.addEventListener("click", () => {
+    void window.deskScribe.installUpdate();
+  });
+  refs.openModelsDirectory.addEventListener("click", () => {
+    void window.deskScribe.openModelsDirectory().catch((error) => setStatus(normalizeErrorMessage(error)));
+  });
+  refs.modelList.addEventListener("click", (event) => {
+    const button = event.target instanceof Element
+      ? event.target.closest<HTMLButtonElement>("[data-model-action]")
+      : null;
+    if (!button) return;
+    const model = managedModels.find((item) => item.id === button.dataset.modelId);
+    if (!model) return;
+    const action = button.dataset.modelAction;
+    if (action === "use") {
+      void applyModelSelection(model);
+      return;
+    }
+    if (action === "download") {
+      modelDownloadProgress.set(model.id, {
+        modelId: model.id,
+        phase: "downloading",
+        transferredBytes: 0,
+        totalBytes: model.sizeBytes,
+        percent: 0,
+        message: `正在连接 ${model.displayName} 下载源`
+      });
+      renderModelLibrary();
+      void window.deskScribe.downloadManagedModel(model.id).then(async () => {
+        await refreshManagedModels();
+        const installed = managedModels.find((item) => item.id === model.id);
+        if (installed?.installed) {
+          await applyModelSelection(installed);
+        }
+      }).catch((error) => setStatus(normalizeErrorMessage(error)));
+      return;
+    }
+    if (action === "cancel") {
+      void window.deskScribe.cancelManagedModelDownload(model.id);
+      return;
+    }
+    if (action === "delete") {
+      if (pendingDeleteModelId !== model.id) {
+        pendingDeleteModelId = model.id;
+        renderModelLibrary();
+        window.setTimeout(() => {
+          if (pendingDeleteModelId === model.id) {
+            pendingDeleteModelId = null;
+            renderModelLibrary();
+          }
+        }, 4000);
+        return;
+      }
+      pendingDeleteModelId = null;
+      void window.deskScribe.deleteManagedModel(model.id).then(refreshManagedModels).catch((error) => {
+        setStatus(normalizeErrorMessage(error));
+      });
+    }
   });
 
   window.addEventListener("keydown", (event) => {
@@ -1341,22 +1544,9 @@ export function mountApp(root: HTMLDivElement) {
   onCustomSelectChange(refs.transcriptionEngineSelect, async () => {
     preferences.transcriptionEngine = getCustomSelectValue<AppPreferences["transcriptionEngine"]>(refs.transcriptionEngineSelect);
     if (preferences.transcriptionEngine === "faster-whisper") {
-      preferences.fasterWhisperModel = "distil-large-v3";
-      setStatus("已切换到 Faster-Whisper 加速引擎，并使用内置 distil-large-v3 模型。");
+      setStatus(`已切换到 Faster-Whisper，当前模型为 ${preferences.fasterWhisperModel}。`);
     } else {
-      setStatus("已切换到 Whisper.cpp 稳定引擎；未选择本地模型时会使用内置 small 模型。");
-    }
-    await persistPreferences();
-  });
-  onCustomSelectChange(refs.fasterModelSelect, async () => {
-    const selectedModel = getCustomSelectValue<EngineModelSelection>(refs.fasterModelSelect);
-    if (selectedModel === "whisper-cpp") {
-      preferences.transcriptionEngine = "whisper-cpp";
-      setStatus("已切换到 Whisper.cpp 稳定引擎；未选择本地模型时会使用内置 small 模型。");
-    } else {
-      preferences.transcriptionEngine = "faster-whisper";
-      preferences.fasterWhisperModel = selectedModel;
-      setStatus("已切换到 Faster-Whisper 加速引擎，并使用内置 distil-large-v3 模型。");
+      setStatus(`已切换到 Whisper.cpp，当前模型为 ${preferences.whisperCppModel}。`);
     }
     await persistPreferences();
   });
@@ -1393,6 +1583,7 @@ export function mountApp(root: HTMLDivElement) {
   refs.pickModelFile.addEventListener("click", () => {
     void bindPicker(window.deskScribe.selectModelFile, (value) => {
       preferences.modelPath = value;
+      preferences.transcriptionEngine = "whisper-cpp";
     });
   });
 
@@ -1400,7 +1591,7 @@ export function mountApp(root: HTMLDivElement) {
     void (async () => {
       preferences.modelPath = "";
       await persistPreferences();
-      setStatus("已清空本地模型，将使用当前引擎对应的内置模型。");
+      setStatus("已清空外部模型，将使用模型库中选择的 Whisper.cpp 模型。");
     })();
   });
   void window.deskScribe.getPreferences().then((loaded) => {
@@ -1411,6 +1602,22 @@ export function mountApp(root: HTMLDivElement) {
   });
 
   const unsubscribeProgress = window.deskScribe.onTranscriptionProgress(applyTranscriptionProgress);
+  const unsubscribeModelProgress = window.deskScribe.onModelDownloadProgress((progress) => {
+    modelDownloadProgress.set(progress.modelId, progress);
+    renderModelLibrary();
+    if (progress.phase === "completed") {
+      void refreshManagedModels();
+    }
+  });
+  const unsubscribeUpdateState = window.deskScribe.onUpdateState((next) => {
+    updateState = next;
+    renderUpdateState();
+  });
+  void refreshManagedModels();
+  void window.deskScribe.getUpdateState().then((next) => {
+    updateState = next;
+    renderUpdateState();
+  });
 
   renderTranscript(null);
   applyWindowMode("compact");
@@ -1422,6 +1629,8 @@ export function mountApp(root: HTMLDivElement) {
     window.clearInterval(tickTimer);
     window.clearInterval(meterTimer);
     unsubscribeProgress();
+    unsubscribeModelProgress();
+    unsubscribeUpdateState();
     cleanupAudio();
   });
 }
