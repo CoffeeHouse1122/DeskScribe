@@ -11,9 +11,7 @@ export function getDefaultPreferences(): AppPreferences {
     closeBehavior: "tray",
     defaultLanguage: "auto",
     exportDirectory: app.getPath("documents"),
-    whisperExecutablePath: "",
     ffmpegExecutablePath: "",
-    modelPath: "",
     disableGpu: true,
     transcriptionEngine: "faster-whisper",
     whisperCppModel: "ggml-small",
@@ -37,11 +35,20 @@ function fasterWhisperModel(value: unknown): FasterWhisperModel {
 function normalizePreferences(value: Partial<AppPreferences>): AppPreferences {
   const defaults = getDefaultPreferences();
   return {
-    ...defaults,
-    ...value,
+    theme: value.theme === "light" || value.theme === "dark" || value.theme === "system" ? value.theme : defaults.theme,
+    closeBehavior: value.closeBehavior === "quit" || value.closeBehavior === "tray" ? value.closeBehavior : defaults.closeBehavior,
+    defaultLanguage: value.defaultLanguage === "zh" || value.defaultLanguage === "en" || value.defaultLanguage === "auto"
+      ? value.defaultLanguage
+      : defaults.defaultLanguage,
+    exportDirectory: typeof value.exportDirectory === "string" ? value.exportDirectory : defaults.exportDirectory,
+    ffmpegExecutablePath: typeof value.ffmpegExecutablePath === "string" ? value.ffmpegExecutablePath : defaults.ffmpegExecutablePath,
+    disableGpu: typeof value.disableGpu === "boolean" ? value.disableGpu : defaults.disableGpu,
     transcriptionEngine: transcriptionEngine(value.transcriptionEngine),
     whisperCppModel: whisperCppModel(value.whisperCppModel),
-    fasterWhisperModel: fasterWhisperModel(value.fasterWhisperModel)
+    fasterWhisperModel: fasterWhisperModel(value.fasterWhisperModel),
+    whisperThreads: Number.isFinite(value.whisperThreads)
+      ? Math.max(0, Math.floor(Number(value.whisperThreads)))
+      : defaults.whisperThreads
   };
 }
 

@@ -161,15 +161,6 @@ async function findBundledModel() {
 }
 
 async function resolveModelPath(preferences: AppPreferences, logs: string[]) {
-  const preferredModelPath = preferences.modelPath?.trim();
-  if (preferredModelPath) {
-    if (await exists(preferredModelPath)) {
-      pushLog(logs, `Using preferred Whisper model: ${preferredModelPath}`);
-      return preferredModelPath;
-    }
-    pushLog(logs, `Preferred Whisper model missing, falling back to managed model: ${preferredModelPath}`);
-  }
-
   const managedModelId = whisperCppManagedModelId(preferences.whisperCppModel);
   const managedModelPath = await resolveManagedModelPath(managedModelId);
   if (managedModelPath) {
@@ -247,9 +238,8 @@ function executablePathCandidates(preferredPath: string | undefined, bundledPath
   return uniquePaths(preferred ? [preferred, ...bundledPaths] : bundledPaths);
 }
 
-function whisperCandidates(preferences: AppPreferences) {
+function whisperCandidates() {
   return uniquePaths([
-    ...executablePathCandidates(preferences.whisperExecutablePath, []),
     ...resourcePathCandidates("bin", "Release", executableName("whisper-cli")),
     ...resourcePathCandidates("bin", executableName("whisper-cli"))
   ]);
@@ -1130,7 +1120,7 @@ async function runWhisperChunk(
   const logStart = logs.length;
   let executable = "";
   const runArgs = async (args: string[]) => runWithCandidates(
-    whisperCandidates(preferences),
+    whisperCandidates(),
     args,
     logs,
     "Unable to locate bundled whisper.cpp CLI. Rebuild or reinstall DeskScribe so resources/bin/Release contains whisper-cli.",

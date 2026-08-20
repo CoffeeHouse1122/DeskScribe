@@ -7,7 +7,7 @@ export default defineConfig({
   publicDir: false,
   build: {
     outDir: "dist/renderer",
-    emptyOutDir: false
+    emptyOutDir: true
   },
   resolve: {
     alias: {

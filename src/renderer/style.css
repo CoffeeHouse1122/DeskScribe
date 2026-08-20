@@ -1205,18 +1205,9 @@ code {
   gap: 8px;
 }
 
-.path-field-with-clear {
-  grid-template-columns: minmax(0, 1fr) 36px 36px;
-}
-
 .path-field button {
   width: 36px;
   height: 34px;
-}
-
-.path-field button:disabled {
-  opacity: 0.42;
-  cursor: default;
 }
 
 .field-block {

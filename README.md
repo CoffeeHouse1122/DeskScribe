@@ -50,7 +50,7 @@ npm run dist:win
 - `ggml-small.bin`：Whisper.cpp 轻量多语言模型。
 - `ggml-large-v3-q5_0.bin`：Whisper.cpp 高精度量化多语言模型。
 
-模型从固定的 Hugging Face 上游提交下载，主权重经过 SHA-256 校验。下载中的 `.part` 文件可以继续断点下载。应用更新不会覆盖模型；NSIS 默认卸载也会保留用户数据。
+模型从固定的 Hugging Face 上游提交下载，主权重经过 SHA-256 校验。下载中的 `.part` 文件可以继续断点下载，下载完成后应用会自动切换到该模型。应用更新不会覆盖模型；NSIS 默认卸载也会保留用户数据。
 
 Windows 默认目录：
 
@@ -58,7 +58,7 @@ Windows 默认目录：
 %APPDATA%\DeskScribe\models
 ```
 
-设置中的“外部 Whisper.cpp 模型”仍可直接选择用户已有的 `.bin` 或 `.gguf` 文件。
+新增模型统一维护在 `src/main/model-manager.ts` 的模型目录清单中。应用发布新版本后，用户可以直接在“本地模型库”按需下载和切换，无需手动选择模型文件。
 
 ## GitHub Releases 自动更新
 

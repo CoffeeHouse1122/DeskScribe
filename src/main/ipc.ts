@@ -134,26 +134,10 @@ export function registerIpc(handlers: IpcHandlers = {}) {
     return result.canceled ? null : result.filePaths[0] ?? null;
   });
 
-  ipcMain.handle("dialog:whisper-file", async () => {
-    const result = await dialog.showOpenDialog({
-      properties: ["openFile"],
-      filters: [{ name: "Executable", extensions: process.platform === "win32" ? ["exe"] : ["*"] }]
-    });
-    return result.canceled ? null : result.filePaths[0] ?? null;
-  });
-
   ipcMain.handle("dialog:ffmpeg-file", async () => {
     const result = await dialog.showOpenDialog({
       properties: ["openFile"],
       filters: [{ name: "Executable", extensions: process.platform === "win32" ? ["exe"] : ["*"] }]
-    });
-    return result.canceled ? null : result.filePaths[0] ?? null;
-  });
-
-  ipcMain.handle("dialog:model-file", async () => {
-    const result = await dialog.showOpenDialog({
-      properties: ["openFile"],
-      filters: [{ name: "Model", extensions: ["bin", "gguf", "*"] }]
     });
     return result.canceled ? null : result.filePaths[0] ?? null;
   });

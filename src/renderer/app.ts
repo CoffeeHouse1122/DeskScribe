@@ -27,9 +27,7 @@ const defaultPreferences: AppPreferences = {
   closeBehavior: "tray",
   defaultLanguage: "auto",
   exportDirectory: "",
-  whisperExecutablePath: "",
   ffmpegExecutablePath: "",
-  modelPath: "",
   disableGpu: true,
   transcriptionEngine: "faster-whisper",
   whisperCppModel: "ggml-small",
@@ -267,24 +265,6 @@ export function mountApp(root: HTMLDivElement) {
           </div>
 
           <div class="path-stack">
-            <div class="path-field path-field-with-clear">
-              <label class="field field-block">
-                <span>转写程序</span>
-                <input id="whisper-executable-input" type="text" readonly placeholder="默认使用内置 CPU 版；可选择 GPU 版 whisper-cli.exe" />
-              </label>
-              <button id="pick-whisper-executable" class="ghost-button icon-only-button" type="button" title="选择 whisper-cli" aria-label="选择 whisper-cli"><i class="ri-terminal-box-line" aria-hidden="true"></i></button>
-              <button id="clear-whisper-executable" class="ghost-button icon-only-button" type="button" title="清空并使用内置转写程序" aria-label="清空并使用内置转写程序"><i class="ri-close-circle-line" aria-hidden="true"></i></button>
-            </div>
-
-            <div class="path-field path-field-with-clear">
-              <label class="field field-block">
-                <span>外部 Whisper.cpp 模型</span>
-                <input id="model-path-input" type="text" readonly placeholder="可直接使用本地 .bin / .gguf 文件" />
-              </label>
-              <button id="pick-model-file" class="ghost-button icon-only-button" type="button" title="选择 Whisper 模型" aria-label="选择 Whisper 模型"><i class="ri-cpu-line" aria-hidden="true"></i></button>
-              <button id="clear-model-file" class="ghost-button icon-only-button" type="button" title="清空并使用模型库" aria-label="清空并使用模型库"><i class="ri-close-circle-line" aria-hidden="true"></i></button>
-            </div>
-
             <div class="path-field">
               <label class="field field-block">
                 <span>导出目录</span>
@@ -299,7 +279,7 @@ export function mountApp(root: HTMLDivElement) {
             <div class="model-library-head">
               <div>
                 <h3 id="model-library-title">本地模型库</h3>
-                <p class="model-library-note">按需下载，应用更新不会影响已安装模型。</p>
+                <p class="model-library-note">下载完成后自动启用，应用更新不会影响已安装模型。</p>
               </div>
               <button id="open-models-directory" class="ghost-button icon-only-button" type="button" title="打开模型目录" aria-label="打开模型目录"><i class="ri-folder-open-line" aria-hidden="true"></i></button>
             </div>
@@ -374,12 +354,6 @@ export function mountApp(root: HTMLDivElement) {
     transcriptionEngineSelect: root.querySelector<HTMLElement>("#transcription-engine-select")!,
     disableGpuCheckbox: root.querySelector<HTMLInputElement>("#disable-gpu-checkbox")!,
     whisperThreadsInput: root.querySelector<HTMLInputElement>("#whisper-threads-input")!,
-    whisperExecutableInput: root.querySelector<HTMLInputElement>("#whisper-executable-input")!,
-    pickWhisperExecutable: root.querySelector<HTMLButtonElement>("#pick-whisper-executable")!,
-    clearWhisperExecutable: root.querySelector<HTMLButtonElement>("#clear-whisper-executable")!,
-    modelPathInput: root.querySelector<HTMLInputElement>("#model-path-input")!,
-    pickModelFile: root.querySelector<HTMLButtonElement>("#pick-model-file")!,
-    clearModelFile: root.querySelector<HTMLButtonElement>("#clear-model-file")!,
     modelList: root.querySelector<HTMLElement>("#model-list")!,
     openModelsDirectory: root.querySelector<HTMLButtonElement>("#open-models-directory")!,
     exportDirectoryInput: root.querySelector<HTMLInputElement>("#export-directory-input")!,
@@ -605,10 +579,6 @@ export function mountApp(root: HTMLDivElement) {
     refs.disableGpuCheckbox.checked = preferences.disableGpu;
     refs.whisperThreadsInput.max = String(Math.max(1, navigator.hardwareConcurrency || 4));
     refs.whisperThreadsInput.value = String(Math.max(0, Math.min(preferences.whisperThreads || 0, Number(refs.whisperThreadsInput.max))));
-    refs.whisperExecutableInput.value = preferences.whisperExecutablePath;
-    refs.modelPathInput.value = preferences.modelPath;
-    refs.clearWhisperExecutable.disabled = !preferences.whisperExecutablePath;
-    refs.clearModelFile.disabled = !preferences.modelPath;
     refs.exportDirectoryInput.value = preferences.exportDirectory;
     setCustomSelectValue(refs.languageSelect, preferences.defaultLanguage, true);
     applyTheme(preferences.theme);
@@ -634,7 +604,7 @@ export function mountApp(root: HTMLDivElement) {
     refs.modelList.innerHTML = managedModels.map((model) => {
       const progress = modelDownloadProgress.get(model.id);
       const active = progress && (progress.phase === "downloading" || progress.phase === "verifying");
-      const selected = model.id === selectedId && (model.engine !== "whisper-cpp" || !preferences.modelPath);
+      const selected = model.id === selectedId;
       const deletePending = pendingDeleteModelId === model.id;
       const action = active
         ? `<button class="ghost-button model-action" data-model-action="cancel" data-model-id="${model.id}" type="button">暂停</button>`
@@ -689,7 +659,6 @@ export function mountApp(root: HTMLDivElement) {
       preferences.fasterWhisperModel = model.modelName === "distil-large-v3" ? "distil-large-v3" : "large-v3-turbo";
     } else {
       preferences.whisperCppModel = model.modelName === "ggml-large-v3-q5_0" ? "ggml-large-v3-q5_0" : "ggml-small";
-      preferences.modelPath = "";
     }
     await persistPreferences();
     setStatus(`已切换到 ${model.displayName}。`);
@@ -1571,38 +1540,10 @@ export function mountApp(root: HTMLDivElement) {
     await persistPreferences();
   });
 
-  refs.pickWhisperExecutable.addEventListener("click", () => {
-    void bindPicker(window.deskScribe.selectWhisperExecutable, (value) => {
-      preferences.whisperExecutablePath = value;
-    });
-  });
-
-  refs.clearWhisperExecutable.addEventListener("click", () => {
-    void (async () => {
-      preferences.whisperExecutablePath = "";
-      await persistPreferences();
-      setStatus("已清空本地转写程序，将使用内置程序。");
-    })();
-  });
-
   refs.pickExportDirectory.addEventListener("click", () => {
     void bindPicker(window.deskScribe.selectExportDirectory, (value) => {
       preferences.exportDirectory = value;
     });
-  });
-  refs.pickModelFile.addEventListener("click", () => {
-    void bindPicker(window.deskScribe.selectModelFile, (value) => {
-      preferences.modelPath = value;
-      preferences.transcriptionEngine = "whisper-cpp";
-    });
-  });
-
-  refs.clearModelFile.addEventListener("click", () => {
-    void (async () => {
-      preferences.modelPath = "";
-      await persistPreferences();
-      setStatus("已清空外部模型，将使用模型库中选择的 Whisper.cpp 模型。");
-    })();
   });
   void window.deskScribe.getPreferences().then((loaded) => {
     preferences = loaded;

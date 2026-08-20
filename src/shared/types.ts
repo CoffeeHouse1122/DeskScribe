@@ -18,9 +18,7 @@ export interface AppPreferences {
   closeBehavior: CloseBehavior;
   defaultLanguage: TranscriptLanguage;
   exportDirectory: string;
-  whisperExecutablePath: string;
   ffmpegExecutablePath: string;
-  modelPath: string;
   disableGpu: boolean;
   transcriptionEngine: TranscriptionEngine;
   whisperCppModel: WhisperCppModel;
@@ -137,9 +135,7 @@ export interface RendererApi {
   getPreferences(): Promise<AppPreferences>;
   savePreferences(next: AppPreferences): Promise<AppPreferences>;
   selectAudioFile(): Promise<string | null>;
-  selectWhisperExecutable(): Promise<string | null>;
   selectFfmpegExecutable(): Promise<string | null>;
-  selectModelFile(): Promise<string | null>;
   selectExportDirectory(): Promise<string | null>;
   getManagedModels(): Promise<ManagedModelInfo[]>;
   downloadManagedModel(modelId: ManagedModelId): Promise<void>;
