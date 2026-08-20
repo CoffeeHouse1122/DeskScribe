@@ -1383,7 +1383,7 @@ export function mountApp(root: HTMLDivElement) {
       refs.pinWindow.classList.toggle("is-active", active);
       const icon = refs.pinWindow.querySelector("i");
       if (icon) {
-        icon.className = active ? "ri-pushpin-fill" : "ri-pushpin-line";
+        icon.className = active ? "ri-pushpin-2-fill" : "ri-pushpin-line";
       }
       refs.pinWindow.setAttribute("aria-pressed", String(active));
       refs.pinWindow.title = active ? "取消置顶" : "置顶窗口";

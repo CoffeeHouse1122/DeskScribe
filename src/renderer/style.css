@@ -235,8 +235,8 @@ button {
 
 #pin-window.is-active,
 #pin-window.is-active:hover {
-  color: #ffffff;
-  background: #1f2937;
+  color: var(--text);
+  background: transparent;
 }
 
 .titlebar-button:disabled {
