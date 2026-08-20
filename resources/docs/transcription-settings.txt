@@ -22,7 +22,8 @@ Faster-Whisper 加速
 - 下载完成后应用自动切换到该模型。
 - 已安装多个模型时，可以点击“使用”进行切换。
 - Faster-Whisper 模型和 Whisper.cpp 模型会自动切换到各自对应的转写引擎。
-- 新模型由应用版本更新模型目录清单后提供，不需要手动选择模型文件。
+- 也可以手动复制模型：Whisper.cpp 的 .bin 文件放在 userData/models 根目录；Faster-Whisper 的完整模型文件放在 userData/models/faster-whisper/<模型名> 目录。
+- 文件名和文件大小与模型清单匹配时，打开设置或从文件管理器返回应用后会自动识别。
 
 3. 计算设备
 

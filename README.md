@@ -58,7 +58,28 @@ Windows 默认目录：
 %APPDATA%\DeskScribe\models
 ```
 
-新增模型统一维护在 `src/main/model-manager.ts` 的模型目录清单中。应用发布新版本后，用户可以直接在“本地模型库”按需下载和切换，无需手动选择模型文件。
+也可以将已有模型手动复制到模型根目录。Whisper.cpp 的 `.bin` 文件直接放在根目录；Faster-Whisper 模型按以下目录结构放置：
+
+```text
+models\
+  ggml-small.bin
+  ggml-large-v3-q5_0.bin
+  faster-whisper\
+    large-v3-turbo\
+      config.json
+      model.bin
+      preprocessor_config.json
+      tokenizer.json
+      vocabulary.json
+    distil-large-v3\
+      config.json
+      model.bin
+      preprocessor_config.json
+      tokenizer.json
+      vocabulary.json
+```
+
+文件名和文件大小与模型清单匹配时，打开设置或从文件管理器返回应用后会自动识别。应用自动下载的模型仍保存在内部版本目录中，两种目录结构可以同时使用。新增模型定义统一维护在 `src/main/model-manager.ts`。
 
 计算设备设置仅对 Faster-Whisper 开放：勾选时强制使用 CPU INT8，取消勾选后优先使用 NVIDIA CUDA，并在不可用时回退 CPU。当前内置 Whisper.cpp 运行时仅支持 CPU。
 

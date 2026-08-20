@@ -162,6 +162,16 @@ function modelDirectory(definition: ModelDefinition) {
   return path.join(getModelsRoot(), definition.engine, definition.modelName, definition.version);
 }
 
+function manualModelDirectory(definition: ModelDefinition) {
+  return definition.engine === "whisper-cpp"
+    ? getModelsRoot()
+    : path.join(getModelsRoot(), definition.engine, definition.modelName);
+}
+
+function modelDirectories(definition: ModelDefinition) {
+  return [modelDirectory(definition), manualModelDirectory(definition)];
+}
+
 function assertManagedPath(targetPath: string) {
   const root = path.resolve(getModelsRoot());
   const target = path.resolve(targetPath);
@@ -175,28 +185,43 @@ async function fileMatches(filePath: string, expectedSize: number) {
   return Boolean(stat?.isFile() && stat.size === expectedSize);
 }
 
-async function modelIsInstalled(definition: ModelDefinition) {
-  const directory = modelDirectory(definition);
+async function directoryHasModel(definition: ModelDefinition, directory: string) {
   const checks = await Promise.all(
     definition.files.map((file) => fileMatches(path.join(directory, file.fileName), file.size))
   );
   return checks.every(Boolean);
 }
 
+async function findInstalledModelDirectory(definition: ModelDefinition) {
+  for (const directory of modelDirectories(definition)) {
+    if (await directoryHasModel(definition, directory)) {
+      return directory;
+    }
+  }
+  return "";
+}
+
+async function modelIsInstalled(definition: ModelDefinition) {
+  return Boolean(await findInstalledModelDirectory(definition));
+}
+
 export async function getManagedModels(): Promise<ManagedModelInfo[]> {
-  return Promise.all(MODEL_CATALOG.map(async (definition) => ({
-    id: definition.id,
-    engine: definition.engine,
-    modelName: definition.modelName,
-    displayName: definition.displayName,
-    description: definition.description,
-    hardwareHint: definition.hardwareHint,
-    languageHint: definition.languageHint,
-    sizeBytes: definition.files.reduce((total, file) => total + file.size, 0),
-    installed: await modelIsInstalled(definition),
-    recommended: definition.recommended,
-    installationPath: modelDirectory(definition)
-  })));
+  return Promise.all(MODEL_CATALOG.map(async (definition) => {
+    const installedDirectory = await findInstalledModelDirectory(definition);
+    return {
+      id: definition.id,
+      engine: definition.engine,
+      modelName: definition.modelName,
+      displayName: definition.displayName,
+      description: definition.description,
+      hardwareHint: definition.hardwareHint,
+      languageHint: definition.languageHint,
+      sizeBytes: definition.files.reduce((total, file) => total + file.size, 0),
+      installed: Boolean(installedDirectory),
+      recommended: definition.recommended,
+      installationPath: installedDirectory || modelDirectory(definition)
+    };
+  }));
 }
 
 export function whisperCppManagedModelId(model: WhisperCppModel): ManagedModelId {
@@ -211,10 +236,10 @@ export function fasterWhisperManagedModelId(model: FasterWhisperModel): ManagedM
 
 export async function resolveManagedModelPath(modelId: ManagedModelId) {
   const definition = definitionFor(modelId);
-  if (!(await modelIsInstalled(definition))) {
+  const directory = await findInstalledModelDirectory(definition);
+  if (!directory) {
     return "";
   }
-  const directory = modelDirectory(definition);
   return definition.engine === "whisper-cpp"
     ? path.join(directory, definition.files[0].fileName)
     : directory;
@@ -428,9 +453,16 @@ export async function deleteManagedModel(modelId: ManagedModelId) {
   if (activeDownloads.has(modelId)) {
     throw new Error("请先取消模型下载，再执行删除。");
   }
-  const directory = modelDirectory(definitionFor(modelId));
-  assertManagedPath(directory);
-  await fs.rm(directory, { recursive: true, force: true });
+  const definition = definitionFor(modelId);
+  const managedDirectory = modelDirectory(definition);
+  assertManagedPath(managedDirectory);
+  await fs.rm(managedDirectory, { recursive: true, force: true });
+
+  const manualDirectory = manualModelDirectory(definition);
+  assertManagedPath(manualDirectory);
+  await Promise.all(definition.files.map((file) => (
+    fs.rm(path.join(manualDirectory, file.fileName), { force: true })
+  )));
 }
 
 function bundledResourceRoots() {

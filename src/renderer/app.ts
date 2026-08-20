@@ -21,6 +21,7 @@ const LIVE_TRANSCRIPTION_INTERVAL_MS = 8000;
 const LIVE_TRANSCRIPTION_MIN_SECONDS = 3;
 const LIVE_TRANSCRIPTION_OVERLAP_SECONDS = 2;
 const LIVE_PCM_SAMPLE_RATE = 16000;
+const WINDOW_MODE_STORAGE_KEY = "deskscribe.window-mode";
 
 const defaultPreferences: AppPreferences = {
   theme: "system",
@@ -279,7 +280,7 @@ export function mountApp(root: HTMLDivElement) {
             <div class="model-library-head">
               <div>
                 <h3 id="model-library-title">本地模型库</h3>
-                <p class="model-library-note">下载完成后自动启用，应用更新不会影响已安装模型。</p>
+                <p class="model-library-note">支持按需下载或手动复制，返回应用后自动识别；更新不影响模型。</p>
               </div>
               <button id="open-models-directory" class="ghost-button icon-only-button" type="button" title="打开模型目录" aria-label="打开模型目录"><i class="ri-folder-open-line" aria-hidden="true"></i></button>
             </div>
@@ -504,6 +505,7 @@ export function mountApp(root: HTMLDivElement) {
 
   function applyWindowMode(mode: WindowMode) {
     windowMode = mode;
+    window.sessionStorage.setItem(WINDOW_MODE_STORAGE_KEY, mode);
     refs.shell.dataset.windowMode = mode;
     document.documentElement.dataset.windowMode = mode;
     const isCompact = mode === "compact";
@@ -514,6 +516,14 @@ export function mountApp(root: HTMLDivElement) {
     refs.maximizeWindow.title = "最大化";
     refs.maximizeWindow.setAttribute("aria-label", "最大化");
     refs.maximizeWindow.querySelector("i")!.className = "ri-checkbox-blank-line";
+  }
+
+  function initialWindowMode(): WindowMode {
+    const stored = window.sessionStorage.getItem(WINDOW_MODE_STORAGE_KEY);
+    if (stored === "compact" || stored === "full") {
+      return stored;
+    }
+    return window.innerWidth >= 700 ? "full" : "compact";
   }
 
   function syncMaximizeButton(maximized: boolean) {
@@ -1576,6 +1586,12 @@ export function mountApp(root: HTMLDivElement) {
     updateState = next;
     renderUpdateState();
   });
+  const refreshModelsOnFocus = () => {
+    if (!refs.settingsPanel.hidden) {
+      void refreshManagedModels();
+    }
+  };
+  window.addEventListener("focus", refreshModelsOnFocus);
   void refreshManagedModels();
   void window.deskScribe.getUpdateState().then((next) => {
     updateState = next;
@@ -1583,7 +1599,7 @@ export function mountApp(root: HTMLDivElement) {
   });
 
   renderTranscript(null);
-  applyWindowMode("compact");
+  applyWindowMode(initialWindowMode());
   resetProcessView("选择音频或结束录音后，会在这里显示转换、识别和整理状态。");
   setRecorderState("idle");
   updateElapsed(0);
@@ -1594,6 +1610,7 @@ export function mountApp(root: HTMLDivElement) {
     unsubscribeProgress();
     unsubscribeModelProgress();
     unsubscribeUpdateState();
+    window.removeEventListener("focus", refreshModelsOnFocus);
     cleanupAudio();
   });
 }
