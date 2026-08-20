@@ -3,7 +3,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import {
   cancelManagedModelDownload,
-  deleteManagedModel,
   downloadManagedModel,
   getManagedModels,
   getModelsRoot,
@@ -167,11 +166,6 @@ export function registerIpc(handlers: IpcHandlers = {}) {
   ipcMain.handle("models:cancel-download", (event, value: unknown) => {
     assertTrustedSender(event);
     return cancelManagedModelDownload(managedModelId(value));
-  });
-
-  ipcMain.handle("models:delete", async (event, value: unknown) => {
-    assertTrustedSender(event);
-    await deleteManagedModel(managedModelId(value));
   });
 
   ipcMain.handle("models:open-directory", async (event) => {

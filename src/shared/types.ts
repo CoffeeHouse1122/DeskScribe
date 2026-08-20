@@ -140,7 +140,6 @@ export interface RendererApi {
   getManagedModels(): Promise<ManagedModelInfo[]>;
   downloadManagedModel(modelId: ManagedModelId): Promise<void>;
   cancelManagedModelDownload(modelId: ManagedModelId): Promise<boolean>;
-  deleteManagedModel(modelId: ManagedModelId): Promise<void>;
   openModelsDirectory(): Promise<void>;
   onModelDownloadProgress(callback: (progress: ModelDownloadProgress) => void): () => void;
   getUpdateState(): Promise<AppUpdateState>;

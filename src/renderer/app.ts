@@ -366,7 +366,6 @@ export function mountApp(root: HTMLDivElement) {
   let preferences = { ...defaultPreferences };
   let managedModels: ManagedModelInfo[] = [];
   const modelDownloadProgress = new Map<ManagedModelId, ModelDownloadProgress>();
-  let pendingDeleteModelId: ManagedModelId | null = null;
   let updateState: AppUpdateState = {
     phase: "idle",
     currentVersion: "",
@@ -623,12 +622,10 @@ export function mountApp(root: HTMLDivElement) {
       const progress = modelDownloadProgress.get(model.id);
       const active = progress && (progress.phase === "downloading" || progress.phase === "verifying");
       const selected = model.id === selectedId;
-      const deletePending = pendingDeleteModelId === model.id;
       const action = active
         ? `<button class="ghost-button model-action" data-model-action="cancel" data-model-id="${model.id}" type="button">暂停</button>`
         : model.installed
-          ? `<button class="${selected ? "ghost-button" : "primary-button"} model-action" data-model-action="use" data-model-id="${model.id}" type="button" ${selected ? "disabled" : ""}>${selected ? "当前使用" : "使用"}</button>
-             <button class="ghost-button icon-only-button model-delete" data-model-action="delete" data-model-id="${model.id}" type="button" title="${deletePending ? "再次点击确认删除" : "删除模型"}" aria-label="${deletePending ? "再次点击确认删除" : "删除模型"}"><i class="${deletePending ? "ri-error-warning-line" : "ri-delete-bin-6-line"}" aria-hidden="true"></i></button>`
+          ? `<button class="${selected ? "ghost-button" : "primary-button"} model-action" data-model-action="use" data-model-id="${model.id}" type="button" ${selected ? "disabled" : ""}>${selected ? "当前使用" : "使用"}</button>`
           : `<button class="primary-button model-action" data-model-action="download" data-model-id="${model.id}" type="button"><i class="ri-download-cloud-2-line" aria-hidden="true"></i>下载</button>`;
       const progressMarkup = progress
         ? `<div class="model-progress ${progress.phase}"><div><span>${escapeHtml(progress.message)}</span><strong>${progress.percent.toFixed(1)}%</strong></div><div class="mini-progress"><span style="width:${progress.percent}%"></span></div></div>`
@@ -638,6 +635,7 @@ export function mountApp(root: HTMLDivElement) {
           <div class="model-card-main">
             <div class="model-title-row">
               <strong>${escapeHtml(model.displayName)}</strong>
+              <span class="model-badge engine">${model.engine === "faster-whisper" ? "Faster-Whisper" : "Whisper.cpp"}</span>
               ${model.recommended ? '<span class="model-badge recommended">默认推荐</span>' : ""}
               <span class="model-badge ${model.installed ? "installed" : ""}">${model.installed ? "已安装" : formatBytes(model.sizeBytes)}</span>
             </div>
@@ -1467,24 +1465,6 @@ export function mountApp(root: HTMLDivElement) {
     }
     if (action === "cancel") {
       void window.deskScribe.cancelManagedModelDownload(model.id);
-      return;
-    }
-    if (action === "delete") {
-      if (pendingDeleteModelId !== model.id) {
-        pendingDeleteModelId = model.id;
-        renderModelLibrary();
-        window.setTimeout(() => {
-          if (pendingDeleteModelId === model.id) {
-            pendingDeleteModelId = null;
-            renderModelLibrary();
-          }
-        }, 4000);
-        return;
-      }
-      pendingDeleteModelId = null;
-      void window.deskScribe.deleteManagedModel(model.id).then(refreshManagedModels).catch((error) => {
-        setStatus(normalizeErrorMessage(error));
-      });
     }
   });
 

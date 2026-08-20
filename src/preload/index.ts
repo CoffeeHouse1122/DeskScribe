@@ -30,7 +30,6 @@ const api: RendererApi = {
   getManagedModels: () => ipcRenderer.invoke("models:list") as Promise<ManagedModelInfo[]>,
   downloadManagedModel: (modelId: ManagedModelId) => ipcRenderer.invoke("models:download", modelId),
   cancelManagedModelDownload: (modelId: ManagedModelId) => ipcRenderer.invoke("models:cancel-download", modelId),
-  deleteManagedModel: (modelId: ManagedModelId) => ipcRenderer.invoke("models:delete", modelId),
   openModelsDirectory: () => ipcRenderer.invoke("models:open-directory"),
   onModelDownloadProgress: (callback: (progress: ModelDownloadProgress) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, progress: ModelDownloadProgress) => callback(progress);

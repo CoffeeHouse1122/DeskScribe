@@ -1108,6 +1108,12 @@ code {
   color: var(--pill-text);
 }
 
+.model-badge.engine {
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--line));
+  background: color-mix(in srgb, var(--accent-soft) 55%, transparent);
+  color: var(--accent-strong);
+}
+
 .model-badge.installed {
   border-color: color-mix(in srgb, var(--success) 38%, var(--line));
   color: var(--success);

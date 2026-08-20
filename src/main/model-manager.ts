@@ -449,22 +449,6 @@ export function cancelManagedModelDownload(modelId: ManagedModelId) {
   return true;
 }
 
-export async function deleteManagedModel(modelId: ManagedModelId) {
-  if (activeDownloads.has(modelId)) {
-    throw new Error("请先取消模型下载，再执行删除。");
-  }
-  const definition = definitionFor(modelId);
-  const managedDirectory = modelDirectory(definition);
-  assertManagedPath(managedDirectory);
-  await fs.rm(managedDirectory, { recursive: true, force: true });
-
-  const manualDirectory = manualModelDirectory(definition);
-  assertManagedPath(manualDirectory);
-  await Promise.all(definition.files.map((file) => (
-    fs.rm(path.join(manualDirectory, file.fileName), { force: true })
-  )));
-}
-
 function bundledResourceRoots() {
   return [
     path.join(process.resourcesPath, "resources", "models"),
