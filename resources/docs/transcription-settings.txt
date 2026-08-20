@@ -1,75 +1,50 @@
 DeskScribe 转写设置说明
 
-本文档说明“偏好设置”中与转写速度、稳定性相关的选项。打包后可在安装目录的 resources/docs/transcription-settings.txt 查看。
+本文档说明“偏好设置”中与转写模型、速度和计算设备相关的选项。打包后可在安装目录的 resources/docs/transcription-settings.txt 查看。
 
 1. 转写引擎
 
 Whisper.cpp 稳定
-- 默认推荐项，也是 DeskScribe 的保底方案。
-- 使用内置 whisper-cli，模型首次使用时从设置中的模型库按需下载。
-- 如果需要更高准确度，可以在设置中选择外部 ggml/gguf 模型，例如量化 large-v3。
-- 适合只有 CPU、只有核显、离线环境、或不想额外安装 Python 依赖的电脑。
-- 优点是部署简单、稳定、离线可用。
-- 缺点是长录音速度通常慢于 Faster-Whisper，尤其使用 large-v3 这类大模型时。
+- 使用 DeskScribe 内置 whisper-cli 和本地模型库中的 Whisper.cpp 模型。
+- 当前随应用打包的是 CPU 运行时，因此固定使用 CPU；设置页会禁用计算设备选项。
+- Whisper Small 适合低配置设备，Large V3 Q5_0 适合更看重识别质量的中英文场景。
+- 长录音速度通常慢于 Faster-Whisper，尤其使用 Large 系列模型时。
 
 Faster-Whisper 加速
-- 使用 DeskScribe 内置 Python + faster-whisper/CTranslate2 运行。
-- 安装包会携带 resources/python 运行时和 faster-whisper 依赖，但不携带模型。
-- 默认推荐 large-v3-turbo：适合中文、英文和中英混合原文转写。
-- distil-large-v3 定位为英语专项模型，不建议用于中文。
-- 模型下载到 userData/models，应用更新不会覆盖，卸载默认也会保留。
-- 用户不需要自行安装 Python 环境，也不需要运行时下载 Faster-Whisper 模型。
-- 适合希望提升长录音转写效率的电脑。
-- 有 NVIDIA CUDA 环境时通常收益最大。
-- 没有独显、只有 AMD/Intel 核显时会继续使用 Faster-Whisper CPU int8，不会因为没有 CUDA 而直接切换引擎。
-- Faster-Whisper 会使用 VAD 跳过静音区间，并按设备选择保守的小批量推理。
-- 连续任务与实时预览会复用已加载模型；空闲一段时间后自动释放内存。
-- 如果 Faster-Whisper 不可用或运行失败，DeskScribe 会自动回退到 Whisper.cpp 稳定方案。
+- 使用 DeskScribe 内置 Python、Faster-Whisper 和 CTranslate2 运行时。
+- Large V3 Turbo 适合中文、英文和中英混合转写；Distil Large V3 定位为英语专项。
+- 模型按需下载到 userData/models，应用更新不会覆盖，默认卸载也会保留。
+- 支持 NVIDIA CUDA，CUDA 不可用或加载失败时自动回退到 CPU INT8。
+- AMD、Intel 核显不会用于 Faster-Whisper 加速。
 
-2. 加速模型
+2. 本地模型库
 
-distil-large-v3
-- Faster-Whisper 当前内置使用的模型。
-- 在准确度和速度之间比较均衡，适合会议、访谈、课堂、普通长录音。
-- 如果你希望比 large-v3 更快，同时保持较好的准确度，优先选它。
-- 为了保证打包后离线可用并避免用户下载模型，DeskScribe 不再在运行时切换/下载其他 Faster-Whisper 模型。
+- 下载完成后应用自动切换到该模型。
+- 已安装多个模型时，可以点击“使用”进行切换。
+- Faster-Whisper 模型和 Whisper.cpp 模型会自动切换到各自对应的转写引擎。
+- 新模型由应用版本更新模型目录清单后提供，不需要手动选择模型文件。
 
-3. CPU 稳定模式
+3. 计算设备
 
-勾选 CPU 稳定模式
-- 推荐给大多数普通电脑、只有核显的电脑、或曾经遇到 GPU 运行失败/崩溃的环境。
-- Whisper.cpp 会明确禁用 GPU。
-- Faster-Whisper 会优先使用 CPU int8，兼容性更好。
-- 这里使用的是 DeskScribe 内置 Python 运行时，不依赖系统 Python。
-- 速度可能不如 CUDA GPU，但稳定性更高。
+选择 Faster-Whisper 时：
+- 勾选“强制使用 CPU”：固定使用 CPU INT8，兼容性和稳定性更好。
+- 取消勾选：优先探测 NVIDIA CUDA，使用 GPU Float16；CUDA 不可用时自动使用 CPU INT8。
 
-取消勾选 CPU 稳定模式
-- 适合已安装 GPU 版 whisper.cpp，或本机有可用 NVIDIA CUDA + faster-whisper 环境的电脑。
-- Whisper.cpp 不再传递 --no-gpu，但是否真正使用 GPU 取决于你选择的 whisper-cli 是否带 CUDA/Vulkan/OpenVINO 等后端。
-- Faster-Whisper 会先探测 NVIDIA CUDA；不可用时自动使用 CPU int8，并且仍保持 Faster-Whisper 引擎。
-- 只有 Intel/AMD 核显时，内置 Faster-Whisper 不会使用核显，而是使用 CPU；不会进行无效的 CUDA 重试。
+选择 Whisper.cpp 时：
+- 当前内置运行时仅支持 CPU，因此计算设备选项会被禁用并显示 CPU 状态。
+- 如果以后随应用提供 GPU 版 Whisper.cpp 运行时，再开放对应 GPU 选项。
 
 4. 转写线程数
 
-默认值 4
-- 更稳妥，适合多数电脑，避免转写时把系统占满。
+- 设置为 0：按机器核心数自动分配，并限制在合理上限内。
+- 设置具体数值：控制 CPU 占用，数值不会超过当前机器的逻辑线程数。
+- Whisper.cpp 使用该值执行推理；Faster-Whisper 使用 GPU 时，该值主要影响 CPU 侧处理。
 
-设置为 0
-- 自动按机器核心数分配线程，并限制不超过合理上限。
-- 如果希望追求速度，可以先尝试 0。
+5. 使用建议
 
-手动设置具体数值
-- 适合你希望控制 CPU 占用时使用。
-- 数值不能超过当前机器可用逻辑线程数。
-- 设置过高不一定更快，可能造成系统卡顿或线程争抢。
-- 线程数现在同时传递给 Whisper.cpp 和 Faster-Whisper；Faster-Whisper 使用 GPU 时该值主要影响 CPU 侧预处理。
-
-5. 长录音建议
-
-- 如果只要求稳定且配置较低：下载 Whisper Small，选择 Whisper.cpp 稳定 + CPU 稳定模式。
-- 如果希望 Whisper.cpp 更高准确度：在设置中选择外部 ggml-large-v3-q5_0.bin 或其他 ggml/gguf 模型。
-- 如果处理中英文或混合语言：选择 Faster-Whisper 加速，使用默认的 large-v3-turbo。
-- 如果只处理英文且更看重速度：选择 distil-large-v3。
-- 如果有 NVIDIA CUDA：取消 CPU 稳定模式，并使用 Faster-Whisper 加速。DeskScribe 会优先使用内置 Python 运行时。
-- 如果只有 AMD/Intel 核显：选择 Faster-Whisper 时可以保留 CPU 稳定模式；即使取消勾选，也会自动回到 Faster-Whisper CPU int8，而不是回退 Whisper.cpp。
-- 如果希望 Whisper.cpp 获得更高精度：下载 ggml-large-v3-q5_0.bin，或选择外部 GGML/GGUF 模型文件。
+- 低配置或稳定优先：Whisper Small + Whisper.cpp。
+- 中英文或混合语言：Large V3 Turbo + Faster-Whisper。
+- 英语长音频和低延迟：Distil Large V3 + Faster-Whisper。
+- 中英文质量优先且可以接受更长耗时：Large V3 Q5_0 + Whisper.cpp。
+- 有 NVIDIA CUDA：使用 Faster-Whisper，并取消勾选“强制使用 CPU”。
+- 只有 AMD、Intel 核显：建议勾选“强制使用 CPU”。

@@ -253,9 +253,9 @@ export function mountApp(root: HTMLDivElement) {
               </div>
             </label>
 
-            <label class="field checkbox-field">
+            <label id="compute-mode-field" class="field checkbox-field">
               <input id="disable-gpu-checkbox" type="checkbox" checked />
-              <span>CPU 稳定模式（关闭后尝试 NVIDIA GPU）</span>
+              <span id="compute-mode-label">强制使用 CPU（取消勾选后优先 NVIDIA GPU）</span>
             </label>
 
             <label class="field">
@@ -352,6 +352,8 @@ export function mountApp(root: HTMLDivElement) {
     closeBehaviorSelect: root.querySelector<HTMLElement>("#close-behavior-select")!,
     defaultLanguageSelect: root.querySelector<HTMLElement>("#default-language-select")!,
     transcriptionEngineSelect: root.querySelector<HTMLElement>("#transcription-engine-select")!,
+    computeModeField: root.querySelector<HTMLElement>("#compute-mode-field")!,
+    computeModeLabel: root.querySelector<HTMLSpanElement>("#compute-mode-label")!,
     disableGpuCheckbox: root.querySelector<HTMLInputElement>("#disable-gpu-checkbox")!,
     whisperThreadsInput: root.querySelector<HTMLInputElement>("#whisper-threads-input")!,
     modelList: root.querySelector<HTMLElement>("#model-list")!,
@@ -576,7 +578,13 @@ export function mountApp(root: HTMLDivElement) {
     setCustomSelectValue(refs.closeBehaviorSelect, preferences.closeBehavior, true);
     setCustomSelectValue(refs.defaultLanguageSelect, preferences.defaultLanguage, true);
     setCustomSelectValue(refs.transcriptionEngineSelect, preferences.transcriptionEngine, true);
-    refs.disableGpuCheckbox.checked = preferences.disableGpu;
+    const whisperCpuOnly = preferences.transcriptionEngine === "whisper-cpp";
+    refs.computeModeField.classList.toggle("is-disabled", whisperCpuOnly);
+    refs.computeModeLabel.textContent = whisperCpuOnly
+      ? "Whisper.cpp 当前使用内置 CPU 运行时"
+      : "强制使用 CPU（取消勾选后优先 NVIDIA GPU）";
+    refs.disableGpuCheckbox.disabled = whisperCpuOnly;
+    refs.disableGpuCheckbox.checked = whisperCpuOnly || preferences.disableGpu;
     refs.whisperThreadsInput.max = String(Math.max(1, navigator.hardwareConcurrency || 4));
     refs.whisperThreadsInput.value = String(Math.max(0, Math.min(preferences.whisperThreads || 0, Number(refs.whisperThreadsInput.max))));
     refs.exportDirectoryInput.value = preferences.exportDirectory;
@@ -616,7 +624,7 @@ export function mountApp(root: HTMLDivElement) {
         ? `<div class="model-progress ${progress.phase}"><div><span>${escapeHtml(progress.message)}</span><strong>${progress.percent.toFixed(1)}%</strong></div><div class="mini-progress"><span style="width:${progress.percent}%"></span></div></div>`
         : "";
       return `
-        <article class="model-card ${selected ? "is-selected" : ""}" data-model-id="${model.id}">
+        <article class="model-card" data-model-id="${model.id}">
           <div class="model-card-main">
             <div class="model-title-row">
               <strong>${escapeHtml(model.displayName)}</strong>
@@ -1373,6 +1381,10 @@ export function mountApp(root: HTMLDivElement) {
   refs.pinWindow.addEventListener("click", () => {
     void window.deskScribe.toggleAlwaysOnTop().then((active) => {
       refs.pinWindow.classList.toggle("is-active", active);
+      const icon = refs.pinWindow.querySelector("i");
+      if (icon) {
+        icon.className = active ? "ri-pushpin-fill" : "ri-pushpin-line";
+      }
       refs.pinWindow.setAttribute("aria-pressed", String(active));
       refs.pinWindow.title = active ? "取消置顶" : "置顶窗口";
       refs.pinWindow.setAttribute("aria-label", refs.pinWindow.title);

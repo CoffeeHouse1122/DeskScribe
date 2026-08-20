@@ -1414,18 +1414,14 @@ async function runWhisper(
     throw new Error(`MODEL_NOT_INSTALLED:${whisperCppManagedModelId(preferences.whisperCppModel)}`);
   }
 
-  pushLog(
-    logs,
-    preferences.disableGpu
-      ? "Using whisper-cli in CPU stable mode."
-      : "GPU mode requested; DeskScribe will not pass --no-gpu. Use a GPU-enabled whisper-cli build for hardware acceleration."
-  );
-  pushLog(logs, `Using ${whisperThreadCount(preferences)} whisper thread(s). Set threads to 0 for automatic allocation.`);
+  const whisperPreferences = preferences.disableGpu ? preferences : { ...preferences, disableGpu: true };
+  pushLog(logs, "Using bundled whisper-cli in CPU mode.");
+  pushLog(logs, `Using ${whisperThreadCount(whisperPreferences)} whisper thread(s). Set threads to 0 for automatic allocation.`);
   await warnIfHighMemoryModel(modelPath, logs);
-  const chunkSeconds = await chooseWhisperChunkSeconds(modelPath, preferences, logs);
+  const chunkSeconds = await chooseWhisperChunkSeconds(modelPath, whisperPreferences, logs);
   const chunkMs = chunkSeconds * 1000;
 
-  const chunks = await splitNormalizedAudio(normalizedPath, tempDir, preferences, chunkSeconds, logs, report, controller);
+  const chunks = await splitNormalizedAudio(normalizedPath, tempDir, whisperPreferences, chunkSeconds, logs, report, controller);
   const documents: TranscriptDocument[] = [];
   let executable = "";
   for (const [index, chunkPath] of chunks.entries()) {
@@ -1445,7 +1441,7 @@ async function runWhisper(
       path.join(tempDir, `transcript-${String(index).padStart(4, "0")}`),
       modelPath,
       language,
-      preferences,
+      whisperPreferences,
       logs,
       sourceType,
       fileName,

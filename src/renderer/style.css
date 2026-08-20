@@ -228,10 +228,15 @@ button {
   font-size: 16px;
 }
 
-.titlebar-button:hover,
-.titlebar-button.is-active {
+.titlebar-button:hover {
   color: var(--accent-strong);
   background: var(--accent-soft);
+}
+
+#pin-window.is-active,
+#pin-window.is-active:hover {
+  color: #ffffff;
+  background: #1f2937;
 }
 
 .titlebar-button:disabled {
@@ -1068,11 +1073,6 @@ code {
   border-color: color-mix(in srgb, var(--accent) 24%, var(--line));
 }
 
-.model-card.is-selected {
-  border-color: var(--accent);
-  box-shadow: inset 2px 0 0 var(--accent);
-}
-
 .model-title-row,
 .model-card-actions {
   display: flex;
@@ -1190,6 +1190,10 @@ code {
   align-items: center;
   gap: 10px;
   padding-top: 4px;
+}
+
+.checkbox-field.is-disabled {
+  color: var(--muted);
 }
 
 .path-stack {

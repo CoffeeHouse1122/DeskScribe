@@ -60,6 +60,8 @@ Windows 默认目录：
 
 新增模型统一维护在 `src/main/model-manager.ts` 的模型目录清单中。应用发布新版本后，用户可以直接在“本地模型库”按需下载和切换，无需手动选择模型文件。
 
+计算设备设置仅对 Faster-Whisper 开放：勾选时强制使用 CPU INT8，取消勾选后优先使用 NVIDIA CUDA，并在不可用时回退 CPU。当前内置 Whisper.cpp 运行时仅支持 CPU。
+
 ## GitHub Releases 自动更新
 
 `electron-updater` 在已安装的生产包启动 12 秒后检查一次 GitHub Releases，后续检查由用户在设置页手动触发。发现新版本后，下载和安装均需要用户分别点击确认，关闭应用不会自动安装更新。
