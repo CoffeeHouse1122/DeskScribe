@@ -438,6 +438,7 @@ export function mountApp(root: HTMLDivElement) {
   let processStartedAt = 0;
   let processElapsedMs = 0;
   let processLogLines: string[] = [];
+  let processContextLine = "";
   let isTranscribing = false;
   let metricsRequestInFlight = false;
 
@@ -564,6 +565,7 @@ export function mountApp(root: HTMLDivElement) {
       refs.processLog.scrollTop = 0;
     }
     renderSelectedFilePath();
+    renderProcessLogLines();
   }
 
   function initialWindowMode(): WindowMode {
@@ -890,6 +892,7 @@ export function mountApp(root: HTMLDivElement) {
       if (force) {
         refs.processPanel.dataset.stage = "queued";
         processLogLines = [];
+        processContextLine = "";
         refs.processLog.innerHTML = "";
         refs.processLogRow.hidden = true;
         refs.processPanel.classList.remove("has-log");
@@ -909,6 +912,7 @@ export function mountApp(root: HTMLDivElement) {
     processStartedAt = 0;
     processElapsedMs = 0;
     processLogLines = [];
+    processContextLine = "";
     refs.processStage.textContent = "空闲";
     refs.processProgress.style.width = "0%";
     refs.processPercent.textContent = "0%";
@@ -918,6 +922,16 @@ export function mountApp(root: HTMLDivElement) {
     refs.processPanel.classList.remove("has-log");
     renderProcessElapsed();
     refs.cancelTranscription.disabled = true;
+  }
+
+  function renderProcessLogLines() {
+    const visibleLines = windowMode === "full" && processContextLine
+      ? [processContextLine, ...processLogLines.filter((line) => line !== processContextLine)]
+      : processLogLines;
+    refs.processLogRow.hidden = visibleLines.length === 0;
+    refs.processPanel.classList.toggle("has-log", visibleLines.length > 0);
+    refs.processLog.innerHTML = visibleLines.map((line) => `<p>${escapeHtml(line)}</p>`).join("");
+    refs.processLog.scrollTop = 0;
   }
 
   function applyTranscriptionProgress(progress: TranscriptionProgressEvent) {
@@ -966,11 +980,11 @@ export function mountApp(root: HTMLDivElement) {
     })();
 
     if (displayDetail) {
-      processLogLines = [displayDetail, ...processLogLines].slice(0, 80);
-      refs.processLogRow.hidden = false;
-      refs.processPanel.classList.add("has-log");
-      refs.processLog.innerHTML = processLogLines.map((line) => `<p>${escapeHtml(line)}</p>`).join("");
-      refs.processLog.scrollTop = 0;
+      if (displayDetail.startsWith("当前使用：")) {
+        processContextLine = displayDetail;
+      }
+      processLogLines = [displayDetail, ...processLogLines.filter((line) => line !== displayDetail)].slice(0, 80);
+      renderProcessLogLines();
     }
     if (progress.stage === "completed" || progress.stage === "failed" || progress.stage === "cancelled") {
       finishProcessClock();
@@ -1168,7 +1182,20 @@ export function mountApp(root: HTMLDivElement) {
         return !previous || previous.text !== segment.text || previous.startMs !== segment.startMs;
       })
       .map((segment, index) => ({ ...segment, id: index + 1 }));
-    refs.transcriptText.value = liveTranscriptSegments.map((segment) => segment.text).join("\n");
+    const text = liveTranscriptSegments.map((segment) => segment.text).join("\n");
+    const segmentDurationMs = liveTranscriptSegments.reduce((maximum, segment) => Math.max(maximum, segment.endMs), 0);
+    const snapshotDurationMs = snapshotStartMs + (document.source.durationMs || 0);
+    renderTranscript({
+      ...document,
+      source: {
+        ...document.source,
+        type: "recording",
+        fileName: "live-transcription-preview.wav",
+        durationMs: Math.max(segmentDurationMs, snapshotDurationMs)
+      },
+      text,
+      segments: liveTranscriptSegments
+    });
     refs.transcriptText.scrollTop = refs.transcriptText.scrollHeight;
   }
 
