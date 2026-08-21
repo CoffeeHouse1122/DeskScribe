@@ -652,7 +652,8 @@ h2 i {
   background: var(--panel-strong);
 }
 
-.path-display > i {
+.path-display > i,
+.path-action {
   width: 24px;
   height: 24px;
   display: grid;
@@ -661,6 +662,27 @@ h2 i {
   color: var(--accent-strong);
   background: var(--accent-soft);
   font-size: 14px;
+}
+
+.path-action {
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+  transition: color 140ms ease, background-color 140ms ease;
+}
+
+.path-action:not(:disabled):hover {
+  color: var(--panel-strong);
+  background: var(--accent);
+}
+
+.path-action:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 62%, transparent);
+  outline-offset: 2px;
+}
+
+.path-action:disabled {
+  cursor: default;
 }
 
 .path-copy {
@@ -691,6 +713,7 @@ h2 i {
 }
 
 .path-display.is-empty > i,
+.path-display.is-empty .path-action,
 .path-display.is-empty .path-name {
   color: var(--muted);
 }

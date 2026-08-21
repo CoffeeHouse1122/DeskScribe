@@ -141,7 +141,9 @@ export function mountApp(root: HTMLDivElement) {
               <button class="ghost-button export-button icon-text-button" data-format="json" type="button" disabled><i class="ri-braces-line" aria-hidden="true"></i><span>JSON</span></button>
             </div>
             <div id="export-path" class="path-display is-empty" title="">
-              <i class="ri-folder-open-line" aria-hidden="true"></i>
+              <button id="open-export-path" class="path-action" type="button" title="打开文件所在目录" aria-label="打开文件所在目录" disabled>
+                <i class="ri-folder-open-line" aria-hidden="true"></i>
+              </button>
               <span class="path-copy">
                 <strong class="path-name">等待转写结果</strong>
                 <small class="path-directory">完成转写后显示导出位置</small>
@@ -381,6 +383,7 @@ export function mountApp(root: HTMLDivElement) {
     transcriptAudioDuration: root.querySelector<HTMLElement>("#transcript-audio-duration")!,
     transcriptProcessDuration: root.querySelector<HTMLElement>("#transcript-process-duration")!,
     exportPath: root.querySelector<HTMLElement>("#export-path")!,
+    openExportPath: root.querySelector<HTMLButtonElement>("#open-export-path")!,
     exportButtons: Array.from(root.querySelectorAll<HTMLButtonElement>(".export-button")),
     themeSelect: root.querySelector<HTMLElement>("#theme-select")!,
     closeBehaviorSelect: root.querySelector<HTMLElement>("#close-behavior-select")!,
@@ -637,6 +640,9 @@ export function mountApp(root: HTMLDivElement) {
       ? displayDirectory(filePath)
       : emptyDirectory;
     element.classList.toggle("is-empty", !filePath);
+    element.dataset.filePath = filePath;
+    const pathAction = element.querySelector<HTMLButtonElement>(".path-action");
+    if (pathAction) pathAction.disabled = !filePath;
     element.title = filePath;
   }
 
@@ -1708,6 +1714,13 @@ export function mountApp(root: HTMLDivElement) {
   refs.exportButtons.forEach((button) => {
     button.addEventListener("click", () => {
       void exportCurrentTranscript(button.dataset.format as ExportFormat);
+    });
+  });
+  refs.openExportPath.addEventListener("click", () => {
+    const filePath = refs.exportPath.dataset.filePath;
+    if (!filePath) return;
+    void window.deskScribe.revealPath(filePath).catch((error) => {
+      setStatus(normalizeErrorMessage(error));
     });
   });
 

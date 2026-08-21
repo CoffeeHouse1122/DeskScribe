@@ -20,7 +20,8 @@ import {
   fasterWhisperSupportsLanguage,
   formatFasterWhisperProgressMessage,
   formatProgressStatusDetail,
-  formatRuntimeProgressDetail
+  formatRuntimeProgressDetail,
+  formatTranscriptionSelectionDetail
 } from "./transcription-policy";
 import type {
   AppPreferences,
@@ -1610,7 +1611,12 @@ async function runWhisper(
 
 export async function transcribeRecording(input: RecordingTranscriptionRequest, preferences: AppPreferences, report?: ProgressReporter, controller?: TranscriptionController): Promise<TranscriptionResult> {
   const logs: string[] = [];
-  report?.({ stage: "queued", message: "正在准备录音数据", progress: 5 });
+  report?.({
+    stage: "queued",
+    message: "正在准备录音数据",
+    detail: formatTranscriptionSelectionDetail(preferences, input.language),
+    progress: 5
+  });
   const { sourcePath, tempDir, safeName } = await writeRecordingInput(input);
   const normalizedPath = await normalizeAudio(sourcePath, tempDir, preferences, logs, report, controller);
   const { document, outputPath } = await runTranscriptionEngine(
@@ -1630,7 +1636,12 @@ export async function transcribeRecording(input: RecordingTranscriptionRequest, 
 
 export async function transcribeFile(filePath: string, language: TranscriptLanguage, preferences: AppPreferences, report?: ProgressReporter, controller?: TranscriptionController): Promise<TranscriptionResult> {
   const logs: string[] = [];
-  report?.({ stage: "queued", message: `正在准备导入文件：${path.basename(filePath)}`, progress: 5 });
+  report?.({
+    stage: "queued",
+    message: `正在准备导入文件：${path.basename(filePath)}`,
+    detail: formatTranscriptionSelectionDetail(preferences, language),
+    progress: 5
+  });
   const tempDir = path.join(app.getPath("temp"), "deskscribe", uniqueId("file"));
   await ensureDir(tempDir);
   const normalizedPath = await normalizeAudio(filePath, tempDir, preferences, logs, report, controller);

@@ -1,10 +1,33 @@
-import type { FasterWhisperModel, TranscriptLanguage, TranscriptionStage } from "../shared/types";
+import type { AppPreferences, FasterWhisperModel, TranscriptLanguage, TranscriptionStage } from "../shared/types";
 
 export function fasterWhisperSupportsLanguage(
   model: FasterWhisperModel,
   language: TranscriptLanguage
 ) {
   return model !== "distil-large-v3" || language === "en";
+}
+
+export function formatTranscriptionSelectionDetail(
+  preferences: AppPreferences,
+  language: TranscriptLanguage
+) {
+  if (
+    preferences.transcriptionEngine === "faster-whisper"
+    && fasterWhisperSupportsLanguage(preferences.fasterWhisperModel, language)
+  ) {
+    const model = preferences.fasterWhisperModel === "large-v3-turbo"
+      ? "Large V3 Turbo"
+      : "Distil Large V3";
+    return `当前使用：Faster-Whisper · ${model}`;
+  }
+
+  const model = preferences.whisperCppModel === "ggml-large-v3-q5_0"
+    ? "Large V3 Q5_0"
+    : "Whisper Small";
+  const fallback = preferences.transcriptionEngine === "faster-whisper"
+    ? "（Distil Large V3 仅支持英语，已自动切换）"
+    : "";
+  return `当前使用：Whisper.cpp · ${model}${fallback}`;
 }
 
 export function advanceTranscriptionProgress(current: number, next: number | undefined) {

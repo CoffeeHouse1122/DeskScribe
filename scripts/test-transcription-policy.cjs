@@ -4,14 +4,48 @@ const {
   fasterWhisperSupportsLanguage,
   formatFasterWhisperProgressMessage,
   formatProgressStatusDetail,
-  formatRuntimeProgressDetail
+  formatRuntimeProgressDetail,
+  formatTranscriptionSelectionDetail
 } = require("../dist/main/transcription-policy.js");
+
+const basePreferences = {
+  theme: "system",
+  closeBehavior: "tray",
+  defaultLanguage: "auto",
+  exportDirectory: "",
+  ffmpegExecutablePath: "",
+  disableGpu: false,
+  transcriptionEngine: "faster-whisper",
+  whisperCppModel: "ggml-small",
+  fasterWhisperModel: "large-v3-turbo",
+  whisperThreads: 0
+};
 
 assert.equal(fasterWhisperSupportsLanguage("distil-large-v3", "en"), true);
 assert.equal(fasterWhisperSupportsLanguage("distil-large-v3", "auto"), false);
 assert.equal(fasterWhisperSupportsLanguage("distil-large-v3", "zh"), false);
 assert.equal(fasterWhisperSupportsLanguage("large-v3-turbo", "auto"), true);
 assert.equal(fasterWhisperSupportsLanguage("large-v3-turbo", "zh"), true);
+
+assert.equal(
+  formatTranscriptionSelectionDetail(basePreferences, "auto"),
+  "当前使用：Faster-Whisper · Large V3 Turbo"
+);
+assert.equal(
+  formatTranscriptionSelectionDetail({
+    ...basePreferences,
+    fasterWhisperModel: "distil-large-v3",
+    whisperCppModel: "ggml-large-v3-q5_0"
+  }, "auto"),
+  "当前使用：Whisper.cpp · Large V3 Q5_0（Distil Large V3 仅支持英语，已自动切换）"
+);
+assert.equal(
+  formatTranscriptionSelectionDetail({
+    ...basePreferences,
+    transcriptionEngine: "whisper-cpp"
+  }, "auto"),
+  "当前使用：Whisper.cpp · Whisper Small"
+);
 
 assert.equal(advanceTranscriptionProgress(70, 56), 70);
 assert.equal(advanceTranscriptionProgress(70, 82), 82);
