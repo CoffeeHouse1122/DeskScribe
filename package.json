@@ -15,7 +15,7 @@
     "build:renderer": "vite build",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.json --noEmit",
     "check": "npm-run-all typecheck build test",
-    "test": "npm run build:main && node scripts/test-transcription-policy.cjs && python scripts/test-faster-whisper-runner.py",
+    "test": "npm run build:main && node scripts/test-transcription-policy.cjs && node scripts/test-system-metrics.cjs && python scripts/test-faster-whisper-runner.py",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder --win nsis",

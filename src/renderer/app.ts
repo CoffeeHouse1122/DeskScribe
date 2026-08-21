@@ -6,6 +6,7 @@ import type {
   ManagedModelInfo,
   ModelDownloadProgress,
   RecordingAudioExportRequest,
+  SystemMetrics,
   TranscriptDocument,
   TranscriptLanguage,
   TranscriptSegment,
@@ -147,10 +148,32 @@ export function mountApp(root: HTMLDivElement) {
                 <button id="cancel-transcription" class="ghost-button icon-text-button danger-button" type="button" disabled><i class="ri-close-circle-line" aria-hidden="true"></i><span>取消</span></button>
               </div>
             </div>
+            <div class="resource-metrics" aria-label="系统资源利用率">
+              <div class="resource-metric" title="系统 CPU 利用率">
+                <span>CPU</span>
+                <strong id="cpu-usage">—</strong>
+                <span class="resource-meter" aria-hidden="true"><i id="cpu-usage-bar"></i></span>
+              </div>
+              <div class="resource-metric" title="系统 GPU 利用率">
+                <span>GPU</span>
+                <strong id="gpu-usage">—</strong>
+                <span class="resource-meter" aria-hidden="true"><i id="gpu-usage-bar"></i></span>
+              </div>
+              <div class="resource-metric" title="系统内存利用率">
+                <span>内存</span>
+                <strong id="memory-usage">—</strong>
+                <span class="resource-meter" aria-hidden="true"><i id="memory-usage-bar"></i></span>
+              </div>
+            </div>
             <div class="progress-track" aria-hidden="true">
               <div id="process-progress" class="progress-fill"></div>
             </div>
-            <p id="process-message" class="status-text">选择音频或结束录音后，会在这里显示转换、识别和整理状态。</p>
+            <div class="process-summary">
+              <p id="process-message" class="status-text">选择音频或结束录音后，会在这里显示转换、识别和整理状态。</p>
+              <button id="toggle-process-log" class="log-toggle" type="button" aria-expanded="false" hidden>
+                <i class="ri-file-list-3-line" aria-hidden="true"></i><span>详情</span>
+              </button>
+            </div>
             <div id="process-log" class="process-log" hidden></div>
           </article>
 
@@ -334,6 +357,13 @@ export function mountApp(root: HTMLDivElement) {
     processProgress: root.querySelector<HTMLDivElement>("#process-progress")!,
     processMessage: root.querySelector<HTMLParagraphElement>("#process-message")!,
     processLog: root.querySelector<HTMLDivElement>("#process-log")!,
+    toggleProcessLog: root.querySelector<HTMLButtonElement>("#toggle-process-log")!,
+    cpuUsage: root.querySelector<HTMLElement>("#cpu-usage")!,
+    cpuUsageBar: root.querySelector<HTMLElement>("#cpu-usage-bar")!,
+    gpuUsage: root.querySelector<HTMLElement>("#gpu-usage")!,
+    gpuUsageBar: root.querySelector<HTMLElement>("#gpu-usage-bar")!,
+    memoryUsage: root.querySelector<HTMLElement>("#memory-usage")!,
+    memoryUsageBar: root.querySelector<HTMLElement>("#memory-usage-bar")!,
     recordingSourceSelect: root.querySelector<HTMLElement>("#recording-source-select")!,
     liveTranscriptionCheckbox: root.querySelector<HTMLInputElement>("#live-transcription-checkbox")!,
     startRecording: root.querySelector<HTMLButtonElement>("#start-recording")!,
@@ -402,7 +432,9 @@ export function mountApp(root: HTMLDivElement) {
   let pausedTotal = 0;
   let processStartedAt = 0;
   let processLogLines: string[] = [];
+  let processLogExpanded = false;
   let isTranscribing = false;
+  let metricsRequestInFlight = false;
 
   const tickTimer = window.setInterval(() => {
     if (recorderState === "recording") {
@@ -413,6 +445,10 @@ export function mountApp(root: HTMLDivElement) {
   const meterTimer = window.setInterval(() => {
     updateMeter();
   }, 120);
+
+  const metricsTimer = window.setInterval(() => {
+    void refreshSystemMetrics();
+  }, 2000);
 
   function closeCustomSelects(except?: HTMLElement) {
     root.querySelectorAll<HTMLElement>(".custom-select.is-open").forEach((select) => {
@@ -536,6 +572,38 @@ export function mountApp(root: HTMLDivElement) {
     refs.processMessage.textContent = text;
     if (!isTranscribing && !isLiveTranscribing) {
       refs.processPanel.dataset.stage = recorderState;
+    }
+  }
+
+  function formatMetricPercent(value: number) {
+    return `${Math.round(value)}%`;
+  }
+
+  function renderSystemMetrics(metrics: SystemMetrics) {
+    refs.cpuUsage.textContent = formatMetricPercent(metrics.cpuPercent);
+    refs.cpuUsageBar.style.width = `${metrics.cpuPercent}%`;
+    refs.memoryUsage.textContent = formatMetricPercent(metrics.memoryPercent);
+    refs.memoryUsageBar.style.width = `${metrics.memoryPercent}%`;
+    refs.gpuUsage.textContent = metrics.gpuAvailable && metrics.gpuPercent !== null
+      ? formatMetricPercent(metrics.gpuPercent)
+      : "不可用";
+    refs.gpuUsageBar.style.width = metrics.gpuAvailable && metrics.gpuPercent !== null
+      ? `${metrics.gpuPercent}%`
+      : "0%";
+    refs.gpuUsage.closest<HTMLElement>(".resource-metric")?.classList.toggle("is-unavailable", !metrics.gpuAvailable);
+  }
+
+  async function refreshSystemMetrics() {
+    if (metricsRequestInFlight || document.hidden) return;
+    metricsRequestInFlight = true;
+    try {
+      renderSystemMetrics(await window.deskScribe.getSystemMetrics());
+    } catch {
+      refs.cpuUsage.textContent = "—";
+      refs.gpuUsage.textContent = "不可用";
+      refs.memoryUsage.textContent = "—";
+    } finally {
+      metricsRequestInFlight = false;
     }
   }
 
@@ -751,6 +819,11 @@ export function mountApp(root: HTMLDivElement) {
     refs.processMessage.textContent = message;
     refs.processLog.hidden = true;
     refs.processLog.innerHTML = "";
+    refs.processPanel.classList.remove("has-log");
+    refs.toggleProcessLog.hidden = true;
+    processLogExpanded = false;
+    refs.processPanel.classList.remove("is-log-expanded");
+    refs.toggleProcessLog.setAttribute("aria-expanded", "false");
     refs.cancelTranscription.disabled = true;
   }
 
@@ -784,7 +857,10 @@ export function mountApp(root: HTMLDivElement) {
     if (progress.detail) {
       processLogLines = [progress.detail, ...processLogLines].slice(0, 80);
       refs.processLog.hidden = false;
+      refs.processPanel.classList.add("has-log");
+      refs.toggleProcessLog.hidden = false;
       refs.processLog.innerHTML = processLogLines.map((line) => `<p>${escapeHtml(line)}</p>`).join("");
+      refs.processLog.scrollTop = 0;
     }
   }
 
@@ -1501,6 +1577,12 @@ export function mountApp(root: HTMLDivElement) {
     }
     void window.deskScribe.cancelTranscription();
   });
+  refs.toggleProcessLog.addEventListener("click", () => {
+    processLogExpanded = !processLogExpanded;
+    refs.processPanel.classList.toggle("is-log-expanded", processLogExpanded);
+    refs.toggleProcessLog.setAttribute("aria-expanded", String(processLogExpanded));
+    refs.toggleProcessLog.querySelector("span")!.textContent = processLogExpanded ? "收起" : "详情";
+  });
   refs.exportRecording.addEventListener("click", () => {
     void exportLastRecording();
   });
@@ -1583,6 +1665,7 @@ export function mountApp(root: HTMLDivElement) {
     updateState = next;
     renderUpdateState();
   });
+  void refreshSystemMetrics();
 
   renderTranscript(null);
   applyWindowMode(initialWindowMode());
@@ -1593,6 +1676,7 @@ export function mountApp(root: HTMLDivElement) {
   window.addEventListener("beforeunload", () => {
     window.clearInterval(tickTimer);
     window.clearInterval(meterTimer);
+    window.clearInterval(metricsTimer);
     unsubscribeProgress();
     unsubscribeModelProgress();
     unsubscribeUpdateState();

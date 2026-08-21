@@ -30,6 +30,7 @@ import type {
   WindowMode
 } from "../shared/types";
 import { applyWindowMode } from "./window-layout";
+import { getSystemMetrics } from "./system-metrics";
 
 interface IpcHandlers {
   onPreferencesSaved?: (preferences: AppPreferences) => void | Promise<void>;
@@ -80,6 +81,11 @@ function createController() {
 }
 
 export function registerIpc(handlers: IpcHandlers = {}) {
+  ipcMain.handle("system:metrics", async (event) => {
+    assertTrustedSender(event);
+    return getSystemMetrics();
+  });
+
   ipcMain.handle("window:set-mode", (event, mode: WindowMode) => {
     const window = BrowserWindow.fromWebContents(event.sender);
     if (!window || (mode !== "compact" && mode !== "full")) return;

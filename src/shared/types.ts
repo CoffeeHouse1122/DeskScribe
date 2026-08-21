@@ -69,6 +69,14 @@ export interface AppUpdateState {
   message: string;
 }
 
+export interface SystemMetrics {
+  cpuPercent: number;
+  memoryPercent: number;
+  gpuPercent: number | null;
+  gpuAvailable: boolean;
+  sampledAt: number;
+}
+
 export interface TranscriptSegment {
   id: number;
   startMs: number;
@@ -132,6 +140,7 @@ export interface RendererApi {
   minimizeWindow(): Promise<void>;
   closeWindow(): Promise<void>;
   reloadWindow(): Promise<void>;
+  getSystemMetrics(): Promise<SystemMetrics>;
   getPreferences(): Promise<AppPreferences>;
   savePreferences(next: AppPreferences): Promise<AppPreferences>;
   selectAudioFile(): Promise<string | null>;
