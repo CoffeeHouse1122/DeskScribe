@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const {
   advanceTranscriptionProgress,
   fasterWhisperSupportsLanguage,
+  formatFasterWhisperProgressMessage,
   formatProgressStatusDetail,
   formatRuntimeProgressDetail
 } = require("../dist/main/transcription-policy.js");
@@ -16,6 +17,19 @@ assert.equal(advanceTranscriptionProgress(70, 56), 70);
 assert.equal(advanceTranscriptionProgress(70, 82), 82);
 assert.equal(advanceTranscriptionProgress(70, undefined), 70);
 assert.equal(advanceTranscriptionProgress(70, 120), 100);
+
+assert.equal(
+  formatFasterWhisperProgressMessage("正在使用 Faster-Whisper 识别语音内容（1/2）", "cuda"),
+  "正在使用 NVIDIA CUDA 识别语音内容（1/2）"
+);
+assert.equal(
+  formatFasterWhisperProgressMessage("正在使用 Faster-Whisper 识别语音内容（1/2）", "cpu"),
+  "正在使用 CPU 识别语音内容（1/2）"
+);
+assert.equal(
+  formatFasterWhisperProgressMessage("正在使用 Faster-Whisper 识别语音内容（1/2）"),
+  "正在使用 Faster-Whisper 识别语音内容（1/2）"
+);
 
 const fixedTime = new Date(2026, 7, 21, 14, 32, 10);
 assert.equal(

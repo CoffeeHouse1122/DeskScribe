@@ -14,6 +14,15 @@ export function advanceTranscriptionProgress(current: number, next: number | und
   return Math.max(current, Math.max(0, Math.min(100, next)));
 }
 
+export function formatFasterWhisperProgressMessage(message: string, device?: string) {
+  const runtimeName = device === "cuda"
+    ? "NVIDIA CUDA"
+    : device === "cpu"
+      ? "CPU"
+      : "Faster-Whisper";
+  return message.replace("Faster-Whisper", runtimeName);
+}
+
 function timestampLabel(now: Date) {
   return [now.getHours(), now.getMinutes(), now.getSeconds()]
     .map((value) => String(value).padStart(2, "0"))

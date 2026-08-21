@@ -18,6 +18,7 @@ import {
 import {
   advanceTranscriptionProgress,
   fasterWhisperSupportsLanguage,
+  formatFasterWhisperProgressMessage,
   formatProgressStatusDetail,
   formatRuntimeProgressDetail
 } from "./transcription-policy";
@@ -513,6 +514,7 @@ class FasterWhisperWorker {
   private executable = "";
   private stdoutBuffer = "";
   private activeLogs: string[] | null = null;
+  private runtimeDevice = "";
   private pending: FasterWorkerPending | null = null;
   private idleTimer: NodeJS.Timeout | null = null;
   private readyWaiter: {
@@ -546,16 +548,17 @@ class FasterWhisperWorker {
   }
 
   private runtimeLog(event: FasterWorkerEvent) {
+    this.runtimeDevice = event.device || "";
     const device = event.device === "cuda" ? "NVIDIA CUDA" : "CPU";
     const computeType = event.computeType || "auto";
     const details = [
       `${device} ${computeType}`,
-      event.cpuThreads !== undefined ? `${event.cpuThreads || "auto"} thread(s)` : "",
-      event.batchSize !== undefined ? `batch ${event.batchSize}` : ""
-    ].filter(Boolean).join(", ");
-    this.log(`Faster-Whisper runtime: ${details}.`);
+      event.cpuThreads !== undefined ? `${event.cpuThreads || "自动"} 线程` : "",
+      event.batchSize !== undefined ? `批大小 ${event.batchSize}` : ""
+    ].filter(Boolean).join("，");
+    this.log(`Faster-Whisper 运行设备：${details}。`);
     if (event.fallbackReason) {
-      this.log(`CUDA unavailable; continuing with Faster-Whisper CPU INT8 -> ${event.fallbackReason.slice(0, 320)}`);
+      this.log(`NVIDIA CUDA 不可用，已自动回退到 CPU INT8：${event.fallbackReason.slice(0, 320)}`);
     }
   }
 
@@ -600,15 +603,19 @@ class FasterWhisperWorker {
     if (!pending || event.id !== pending.id) return;
     if (event.type === "progress") {
       const percent = Math.max(0, Math.min(100, Number(event.progress || 0)));
+      const runtimeMessage = formatFasterWhisperProgressMessage(
+        pending.progressWindow.message,
+        this.runtimeDevice
+      );
       pending.lastProgress = advanceTranscriptionProgress(
         pending.lastProgress,
         pending.progressWindow.base + (percent / 100) * pending.progressWindow.span
       );
       pending.report?.({
         stage: "transcribing",
-        message: pending.progressWindow.message,
+        message: runtimeMessage,
         detail: formatProgressStatusDetail(
-          pending.progressWindow.message,
+          runtimeMessage,
           percent,
           Date.now() - pending.startedAt
         ),
@@ -654,6 +661,7 @@ class FasterWhisperWorker {
     this.executable = "";
     this.stdoutBuffer = "";
     this.activeLogs = null;
+    this.runtimeDevice = "";
     this.clearIdleTimer();
   }
 
@@ -701,6 +709,7 @@ class FasterWhisperWorker {
     this.configKey = this.workerKey(executable, config);
     this.stdoutBuffer = "";
     this.activeLogs = logs;
+    this.runtimeDevice = "";
     controller?.attach(child);
     child.stdout?.on("data", (chunk: Buffer) => this.handleStdout(chunk));
     child.stderr?.on("data", (chunk: Buffer) => {
@@ -771,11 +780,15 @@ class FasterWhisperWorker {
     const result = await new Promise<FasterWhisperRawResult>((resolve, reject) => {
       const heartbeatTimer = setInterval(() => {
         const pending = this.pending;
+        const runtimeMessage = formatFasterWhisperProgressMessage(
+          progressWindow.message,
+          this.runtimeDevice
+        );
         report?.({
           stage: "transcribing",
-          message: `${progressWindow.message}（模型仍在计算，长录音可能需要数分钟）`,
+          message: `${runtimeMessage}（模型仍在计算，长录音可能需要数分钟）`,
           detail: formatProgressStatusDetail(
-            progressWindow.message,
+            runtimeMessage,
             pending?.lastProgress ?? progressWindow.base,
             Date.now() - startedAt
           ),
@@ -816,6 +829,7 @@ class FasterWhisperWorker {
     this.executable = "";
     this.stdoutBuffer = "";
     this.activeLogs = null;
+    this.runtimeDevice = "";
     if (child && !child.killed) {
       child.kill();
     }

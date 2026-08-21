@@ -116,7 +116,13 @@ export function mountApp(root: HTMLDivElement) {
                 <h2><i class="ri-folder-music-line" aria-hidden="true"></i><span>导入音频</span></h2>
               </div>
             </div>
-            <p id="selected-file" class="muted">未选择文件</p>
+            <div id="selected-file" class="path-display is-empty" title="">
+              <i class="ri-file-music-line" aria-hidden="true"></i>
+              <span class="path-copy">
+                <strong class="path-name">未选择文件</strong>
+                <small class="path-directory">选择音频后显示文件位置</small>
+              </span>
+            </div>
             <div class="button-row">
               <button id="choose-file" class="ghost-button icon-text-button" type="button"><i class="ri-folder-music-line" aria-hidden="true"></i><span>选择文件</span></button>
               <button id="transcribe-file" class="primary-button icon-text-button" type="button" disabled><i class="ri-magic-line" aria-hidden="true"></i><span>开始转写</span></button>
@@ -134,7 +140,13 @@ export function mountApp(root: HTMLDivElement) {
               <button class="ghost-button export-button icon-text-button" data-format="srt" type="button" disabled><i class="ri-timer-line" aria-hidden="true"></i><span>SRT</span></button>
               <button class="ghost-button export-button icon-text-button" data-format="json" type="button" disabled><i class="ri-braces-line" aria-hidden="true"></i><span>JSON</span></button>
             </div>
-            <p id="export-path" class="muted">导出后会自动定位文件位置。</p>
+            <div id="export-path" class="path-display is-empty" title="">
+              <i class="ri-folder-open-line" aria-hidden="true"></i>
+              <span class="path-copy">
+                <strong class="path-name">等待转写结果</strong>
+                <small class="path-directory">完成转写后显示导出位置</small>
+              </span>
+            </div>
           </article>
         </section>
 
@@ -150,8 +162,8 @@ export function mountApp(root: HTMLDivElement) {
                   <strong id="cpu-usage">—</strong>
                   <span class="resource-meter" aria-hidden="true"><i id="cpu-usage-bar"></i></span>
                 </div>
-                <div class="resource-metric" title="系统 GPU 利用率">
-                  <span>GPU</span>
+                <div class="resource-metric" title="整机 GPU 利用率，仅用于监控；实际转写设备请查看执行日志">
+                  <span>系统GPU</span>
                   <strong id="gpu-usage">—</strong>
                   <span class="resource-meter" aria-hidden="true"><i id="gpu-usage-bar"></i></span>
                 </div>
@@ -278,7 +290,7 @@ export function mountApp(root: HTMLDivElement) {
 
             <label id="compute-mode-field" class="field checkbox-field">
               <input id="disable-gpu-checkbox" type="checkbox" checked />
-              <span id="compute-mode-label">强制使用 CPU（取消勾选后优先 NVIDIA GPU）</span>
+              <span id="compute-mode-label">强制使用 CPU（取消后优先 NVIDIA CUDA；AMD/Intel 核显仍使用 CPU）</span>
             </label>
 
             <label class="field">
@@ -376,13 +388,13 @@ export function mountApp(root: HTMLDivElement) {
     exportRecording: root.querySelector<HTMLButtonElement>("#export-recording")!,
     chooseFile: root.querySelector<HTMLButtonElement>("#choose-file")!,
     transcribeFile: root.querySelector<HTMLButtonElement>("#transcribe-file")!,
-    selectedFile: root.querySelector<HTMLParagraphElement>("#selected-file")!,
+    selectedFile: root.querySelector<HTMLElement>("#selected-file")!,
     transcriptText: root.querySelector<HTMLTextAreaElement>("#transcript-text")!,
     transcriptStats: root.querySelector<HTMLElement>("#transcript-stats")!,
     transcriptCharacters: root.querySelector<HTMLElement>("#transcript-characters")!,
     transcriptAudioDuration: root.querySelector<HTMLElement>("#transcript-audio-duration")!,
     transcriptProcessDuration: root.querySelector<HTMLElement>("#transcript-process-duration")!,
-    exportPath: root.querySelector<HTMLParagraphElement>("#export-path")!,
+    exportPath: root.querySelector<HTMLElement>("#export-path")!,
     exportButtons: Array.from(root.querySelectorAll<HTMLButtonElement>(".export-button")),
     languageSelect: root.querySelector<HTMLElement>("#language-select")!,
     themeSelect: root.querySelector<HTMLElement>("#theme-select")!,
@@ -620,24 +632,36 @@ export function mountApp(root: HTMLDivElement) {
     }
   }
 
-  function displayPath(filePath: string, tailSegments = 3) {
+  function displayDirectory(filePath: string, tailSegments = 3) {
     const separator = filePath.includes("\\") ? "\\" : "/";
     const segments = filePath.split(/[\\/]/).filter(Boolean);
-    if (segments.length <= tailSegments) return filePath;
+    segments.pop();
+    if (segments.length <= tailSegments) return segments.join(separator);
     return `…${separator}${segments.slice(-tailSegments).join(separator)}`;
   }
 
-  function setPathText(element: HTMLElement, filePath: string, emptyText: string) {
-    element.textContent = filePath ? displayPath(filePath) : emptyText;
+  function setPathText(
+    element: HTMLElement,
+    filePath: string,
+    emptyName: string,
+    emptyDirectory: string
+  ) {
+    const fileName = filePath.split(/[\\/]/).filter(Boolean).pop() || filePath;
+    element.querySelector<HTMLElement>(".path-name")!.textContent = filePath ? fileName : emptyName;
+    element.querySelector<HTMLElement>(".path-directory")!.textContent = filePath
+      ? displayDirectory(filePath)
+      : emptyDirectory;
+    element.classList.toggle("is-empty", !filePath);
     element.title = filePath;
   }
 
   function renderSelectedFilePath() {
-    const fileName = selectedFilePath.split(/[\\/]/).filter(Boolean).pop() || selectedFilePath;
-    refs.selectedFile.textContent = selectedFilePath
-      ? windowMode === "compact" ? fileName : displayPath(selectedFilePath)
-      : "未选择文件";
-    refs.selectedFile.title = selectedFilePath;
+    setPathText(
+      refs.selectedFile,
+      selectedFilePath,
+      "未选择文件",
+      "选择音频后显示文件位置"
+    );
   }
 
   function syncRecorderProcessState(next: RecorderState) {
@@ -695,7 +719,7 @@ export function mountApp(root: HTMLDivElement) {
     refs.computeModeField.classList.toggle("is-disabled", whisperCpuOnly);
     refs.computeModeLabel.textContent = whisperCpuOnly
       ? "Whisper.cpp 当前使用内置 CPU 运行时"
-      : "强制使用 CPU（取消勾选后优先 NVIDIA GPU）";
+      : "强制使用 CPU（取消后优先 NVIDIA CUDA；AMD/Intel 核显仍使用 CPU）";
     refs.disableGpuCheckbox.disabled = whisperCpuOnly;
     refs.disableGpuCheckbox.checked = whisperCpuOnly || preferences.disableGpu;
     refs.whisperThreadsInput.max = String(Math.max(1, navigator.hardwareConcurrency || 4));
@@ -975,7 +999,7 @@ export function mountApp(root: HTMLDivElement) {
       renderTranscript(result.document);
       applyTranscriptionProgress({ stage: "completed", message: "转写完成", progress: 100 });
       setStatus(`转写完成，检测语言：${result.document.engine.detectedLanguage || result.document.source.language}`);
-      setPathText(refs.exportPath, result.outputPath, "导出后会自动定位文件位置。");
+      setPathText(refs.exportPath, result.outputPath, "等待转写结果", "完成转写后显示导出位置");
     } catch (error) {
       const missingModel = /MODEL_NOT_INSTALLED:/i.test(error instanceof Error ? error.message : String(error));
       const message = normalizeErrorMessage(error);
@@ -1494,7 +1518,7 @@ export function mountApp(root: HTMLDivElement) {
     if (!currentTranscript) return;
     const filePath = await window.deskScribe.exportTranscript(currentTranscript, format);
     if (filePath) {
-      setPathText(refs.exportPath, filePath, "导出后会自动定位文件位置。");
+      setPathText(refs.exportPath, filePath, "等待转写结果", "完成转写后显示导出位置");
       await window.deskScribe.revealPath(filePath);
       setStatus(`${format.toUpperCase()} 已导出。`);
     }

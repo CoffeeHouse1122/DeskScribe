@@ -460,7 +460,7 @@ h2 i {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
-  width: min(310px, 62%);
+  width: min(330px, 65%);
   margin-left: auto;
 }
 
@@ -484,6 +484,7 @@ h2 i {
   font-size: 10px;
   font-weight: 650;
   letter-spacing: 0.03em;
+  white-space: nowrap;
 }
 
 .resource-metric strong {
@@ -493,6 +494,7 @@ h2 i {
   line-height: 1;
   text-align: right;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .resource-metric.is-unavailable strong {
@@ -633,25 +635,72 @@ h2 i {
   line-height: 1.55;
 }
 
-#selected-file,
-#export-path,
 #process-message {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-#selected-file,
-#export-path {
-  height: 32px;
-  display: flex;
+.path-display {
+  height: 40px;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
   align-items: center;
-  padding: 0 9px;
+  gap: 8px;
+  padding: 0 8px;
   direction: ltr;
   text-align: left;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--panel-strong);
+}
+
+.path-display > i {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  font-size: 14px;
+}
+
+.path-copy {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.path-name,
+.path-directory {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.path-name {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.path-directory {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.path-display.is-empty > i,
+.path-display.is-empty .path-name {
+  color: var(--muted);
+}
+
+.path-display.is-empty .path-name {
+  font-weight: 500;
 }
 
 code {
@@ -1538,7 +1587,8 @@ code {
 
 .shell[data-window-mode="compact"] .import-panel #selected-file {
   height: 32px;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
   padding: 0 9px;
   direction: ltr;
@@ -1548,6 +1598,15 @@ code {
   background: var(--panel-strong);
   color: var(--text);
   font-weight: 600;
+}
+
+.shell[data-window-mode="compact"] .import-panel #selected-file > i,
+.shell[data-window-mode="compact"] .import-panel #selected-file .path-directory {
+  display: none;
+}
+
+.shell[data-window-mode="compact"] .import-panel #selected-file .path-copy {
+  display: block;
 }
 
 .shell[data-window-mode="compact"] .import-panel .button-row {
