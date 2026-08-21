@@ -1,6 +1,6 @@
 {
   "name": "deskscribe",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Compact desktop recorder and transcription app.",
   "productName": "DeskScribe",
   "main": "dist/main/index.js",
