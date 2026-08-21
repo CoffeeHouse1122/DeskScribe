@@ -17,7 +17,9 @@ import {
 } from "./model-manager";
 import {
   advanceTranscriptionProgress,
-  fasterWhisperSupportsLanguage
+  fasterWhisperSupportsLanguage,
+  formatProgressStatusDetail,
+  formatRuntimeProgressDetail
 } from "./transcription-policy";
 import type {
   AppPreferences,
@@ -356,6 +358,11 @@ async function runCandidate(
       report?.({
         stage,
         message: progressWindow?.message || (stage === "normalizing" ? "正在转换音频格式" : "正在识别语音内容"),
+        detail: formatProgressStatusDetail(
+          progressWindow?.message || (stage === "normalizing" ? "正在转换音频格式" : "正在识别语音内容"),
+          lastProgress,
+          elapsedMs
+        ),
         progress: Math.round(lastProgress),
         elapsedMs
       });
@@ -388,7 +395,7 @@ async function runCandidate(
         report?.({
           stage,
           message: progressWindow?.message || (stage === "normalizing" ? "正在转换音频格式" : "正在识别语音内容"),
-          detail: line.slice(0, 240),
+          detail: formatRuntimeProgressDetail(line, stage),
           progress: Math.round(lastProgress),
           elapsedMs: now - startedAt
         });
@@ -600,6 +607,11 @@ class FasterWhisperWorker {
       pending.report?.({
         stage: "transcribing",
         message: pending.progressWindow.message,
+        detail: formatProgressStatusDetail(
+          pending.progressWindow.message,
+          percent,
+          Date.now() - pending.startedAt
+        ),
         progress: Math.round(pending.lastProgress),
         elapsedMs: Date.now() - pending.startedAt
       });
@@ -762,6 +774,11 @@ class FasterWhisperWorker {
         report?.({
           stage: "transcribing",
           message: `${progressWindow.message}（模型仍在计算，长录音可能需要数分钟）`,
+          detail: formatProgressStatusDetail(
+            progressWindow.message,
+            pending?.lastProgress ?? progressWindow.base,
+            Date.now() - startedAt
+          ),
           progress: Math.round(pending?.lastProgress ?? progressWindow.base),
           elapsedMs: Date.now() - startedAt
         });

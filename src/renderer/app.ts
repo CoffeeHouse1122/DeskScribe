@@ -139,42 +139,51 @@ export function mountApp(root: HTMLDivElement) {
 
         <section class="column content-column">
           <article id="process-panel" class="panel process-panel" aria-live="polite">
-            <div class="panel-title">
+            <div class="panel-title process-title-row">
               <div>
                 <h2><i class="ri-pulse-line" aria-hidden="true"></i><span>执行进程</span></h2>
               </div>
-              <div class="process-actions">
-                <span id="process-stage" class="state-pill">空闲</span>
-                <button id="cancel-transcription" class="ghost-button icon-text-button danger-button" type="button" disabled><i class="ri-close-circle-line" aria-hidden="true"></i><span>取消</span></button>
+              <div class="resource-metrics" aria-label="系统资源利用率">
+                <div class="resource-metric" title="系统 CPU 利用率">
+                  <span>CPU</span>
+                  <strong id="cpu-usage">—</strong>
+                  <span class="resource-meter" aria-hidden="true"><i id="cpu-usage-bar"></i></span>
+                </div>
+                <div class="resource-metric" title="系统 GPU 利用率">
+                  <span>GPU</span>
+                  <strong id="gpu-usage">—</strong>
+                  <span class="resource-meter" aria-hidden="true"><i id="gpu-usage-bar"></i></span>
+                </div>
+                <div class="resource-metric" title="系统内存利用率">
+                  <span>内存</span>
+                  <strong id="memory-usage">—</strong>
+                  <span class="resource-meter" aria-hidden="true"><i id="memory-usage-bar"></i></span>
+                </div>
               </div>
             </div>
-            <div class="resource-metrics" aria-label="系统资源利用率">
-              <div class="resource-metric" title="系统 CPU 利用率">
-                <span>CPU</span>
-                <strong id="cpu-usage">—</strong>
-                <span class="resource-meter" aria-hidden="true"><i id="cpu-usage-bar"></i></span>
-              </div>
-              <div class="resource-metric" title="系统 GPU 利用率">
-                <span>GPU</span>
-                <strong id="gpu-usage">—</strong>
-                <span class="resource-meter" aria-hidden="true"><i id="gpu-usage-bar"></i></span>
-              </div>
-              <div class="resource-metric" title="系统内存利用率">
-                <span>内存</span>
-                <strong id="memory-usage">—</strong>
-                <span class="resource-meter" aria-hidden="true"><i id="memory-usage-bar"></i></span>
-              </div>
-            </div>
-            <div class="progress-track" aria-hidden="true">
-              <div id="process-progress" class="progress-fill"></div>
-            </div>
-            <div class="process-summary">
+            <div class="process-status-row">
+              <span id="process-stage" class="state-pill">空闲</span>
               <p id="process-message" class="status-text">选择音频或结束录音后，会在这里显示转换、识别和整理状态。</p>
+              <button id="cancel-transcription" class="ghost-button icon-text-button danger-button" type="button" disabled><i class="ri-close-circle-line" aria-hidden="true"></i><span>取消</span></button>
+            </div>
+            <div class="process-progress-row">
+              <div class="progress-track" aria-hidden="true">
+                <div id="process-progress" class="progress-fill"></div>
+              </div>
+              <strong id="process-percent" class="process-percent">0%</strong>
+            </div>
+            <div class="process-engine-summary">
+              <span id="process-engine">Faster-Whisper</span>
+              <i aria-hidden="true"></i>
+              <span>转写用时 <strong id="process-elapsed">00:00:00</strong></span>
+            </div>
+            <div class="process-log-row" hidden>
+              <span class="process-log-dot" aria-hidden="true"></span>
+              <div id="process-log" class="process-log"></div>
               <button id="toggle-process-log" class="log-toggle" type="button" aria-expanded="false" hidden>
-                <i class="ri-file-list-3-line" aria-hidden="true"></i><span>详情</span>
+                <span>查看详情</span>
               </button>
             </div>
-            <div id="process-log" class="process-log" hidden></div>
           </article>
 
           <article class="panel transcript-panel">
@@ -204,6 +213,13 @@ export function mountApp(root: HTMLDivElement) {
               readonly
               placeholder="录音或导入音频后，文本会显示在这里。"
             ></textarea>
+            <div id="transcript-stats" class="transcript-stats" hidden>
+              <span>字数 <strong id="transcript-characters">0</strong></span>
+              <i aria-hidden="true"></i>
+              <span>音频时长 <strong id="transcript-audio-duration">00:00:00</strong></span>
+              <i aria-hidden="true"></i>
+              <span>转写用时 <strong id="transcript-process-duration">00:00:00</strong></span>
+            </div>
           </article>
         </section>
       </main>
@@ -355,9 +371,13 @@ export function mountApp(root: HTMLDivElement) {
     processStage: root.querySelector<HTMLSpanElement>("#process-stage")!,
     cancelTranscription: root.querySelector<HTMLButtonElement>("#cancel-transcription")!,
     processProgress: root.querySelector<HTMLDivElement>("#process-progress")!,
+    processPercent: root.querySelector<HTMLElement>("#process-percent")!,
     processMessage: root.querySelector<HTMLParagraphElement>("#process-message")!,
     processLog: root.querySelector<HTMLDivElement>("#process-log")!,
+    processLogRow: root.querySelector<HTMLElement>(".process-log-row")!,
     toggleProcessLog: root.querySelector<HTMLButtonElement>("#toggle-process-log")!,
+    processEngine: root.querySelector<HTMLElement>("#process-engine")!,
+    processElapsed: root.querySelector<HTMLElement>("#process-elapsed")!,
     cpuUsage: root.querySelector<HTMLElement>("#cpu-usage")!,
     cpuUsageBar: root.querySelector<HTMLElement>("#cpu-usage-bar")!,
     gpuUsage: root.querySelector<HTMLElement>("#gpu-usage")!,
@@ -376,6 +396,10 @@ export function mountApp(root: HTMLDivElement) {
     transcribeFile: root.querySelector<HTMLButtonElement>("#transcribe-file")!,
     selectedFile: root.querySelector<HTMLParagraphElement>("#selected-file")!,
     transcriptText: root.querySelector<HTMLTextAreaElement>("#transcript-text")!,
+    transcriptStats: root.querySelector<HTMLElement>("#transcript-stats")!,
+    transcriptCharacters: root.querySelector<HTMLElement>("#transcript-characters")!,
+    transcriptAudioDuration: root.querySelector<HTMLElement>("#transcript-audio-duration")!,
+    transcriptProcessDuration: root.querySelector<HTMLElement>("#transcript-process-duration")!,
     exportPath: root.querySelector<HTMLParagraphElement>("#export-path")!,
     exportButtons: Array.from(root.querySelectorAll<HTMLButtonElement>(".export-button")),
     languageSelect: root.querySelector<HTMLElement>("#language-select")!,
@@ -431,6 +455,7 @@ export function mountApp(root: HTMLDivElement) {
   let pausedAt = 0;
   let pausedTotal = 0;
   let processStartedAt = 0;
+  let processElapsedMs = 0;
   let processLogLines: string[] = [];
   let processLogExpanded = false;
   let isTranscribing = false;
@@ -439,6 +464,10 @@ export function mountApp(root: HTMLDivElement) {
   const tickTimer = window.setInterval(() => {
     if (recorderState === "recording") {
       updateElapsed();
+    }
+    if ((isTranscribing || isLiveTranscribing) && processStartedAt) {
+      processElapsedMs = Date.now() - processStartedAt;
+      renderProcessElapsed();
     }
   }, 250);
 
@@ -615,6 +644,10 @@ export function mountApp(root: HTMLDivElement) {
 
   function syncRecorderProcessState(next: RecorderState) {
     if (isTranscribing || isLiveTranscribing) return;
+    if (next === "idle" && ["completed", "failed", "cancelled"].includes(refs.processPanel.dataset.stage || "")) {
+      refs.cancelTranscription.disabled = true;
+      return;
+    }
     refs.processStage.textContent =
       next === "recording" ? "录音中" :
       next === "paused" ? "已暂停" :
@@ -672,6 +705,7 @@ export function mountApp(root: HTMLDivElement) {
     refs.whisperThreadsInput.value = String(Math.max(0, Math.min(preferences.whisperThreads || 0, Number(refs.whisperThreadsInput.max))));
     refs.exportDirectoryInput.value = preferences.exportDirectory;
     setCustomSelectValue(refs.languageSelect, preferences.defaultLanguage, true);
+    refs.processEngine.textContent = engineDisplayName();
     applyTheme(preferences.theme);
     renderModelLibrary();
   }
@@ -757,6 +791,13 @@ export function mountApp(root: HTMLDivElement) {
   function renderTranscript(document: TranscriptDocument | null) {
     currentTranscript = document;
     refs.transcriptText.value = document?.text || "";
+    refs.transcriptStats.hidden = !document;
+    if (document) {
+      refs.transcriptCharacters.textContent = String(document.text.replace(/\s/g, "").length);
+      refs.transcriptAudioDuration.textContent = formatLongDuration(document.source.durationMs || 0);
+      refs.transcriptProcessDuration.textContent = formatLongDuration(processElapsedMs);
+      refs.processEngine.textContent = engineDisplayName(document.engine.name === "faster-whisper" ? "faster-whisper" : "whisper-cpp");
+    }
     refs.exportButtons.forEach((button) => {
       button.disabled = !document;
     });
@@ -811,25 +852,75 @@ export function mountApp(root: HTMLDivElement) {
     return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
   }
 
+  function formatLongDuration(timeMs: number) {
+    const totalSeconds = Math.max(0, Math.floor(timeMs / 1000));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    return [hours, minutes, seconds].map((value) => String(value).padStart(2, "0")).join(":");
+  }
+
+  function engineDisplayName(engine = preferences.transcriptionEngine) {
+    return engine === "faster-whisper" ? "Faster-Whisper" : "Whisper.cpp";
+  }
+
+  function renderProcessElapsed() {
+    const label = formatLongDuration(processElapsedMs);
+    refs.processElapsed.textContent = label;
+    if (currentTranscript) {
+      refs.transcriptProcessDuration.textContent = label;
+    }
+  }
+
+  function startProcessClock(force = false) {
+    if (force || !processStartedAt) {
+      processStartedAt = Date.now();
+      processElapsedMs = 0;
+      if (force) {
+        refs.processPanel.dataset.stage = "queued";
+        processLogLines = [];
+        processLogExpanded = false;
+        refs.processLog.innerHTML = "";
+        refs.processLogRow.hidden = true;
+        refs.processPanel.classList.remove("has-log", "is-log-expanded");
+        refs.toggleProcessLog.hidden = true;
+        refs.toggleProcessLog.setAttribute("aria-expanded", "false");
+        refs.toggleProcessLog.querySelector("span")!.textContent = "查看详情";
+      }
+      renderProcessElapsed();
+    }
+  }
+
+  function finishProcessClock() {
+    if (processStartedAt) {
+      processElapsedMs = Math.max(processElapsedMs, Date.now() - processStartedAt);
+      renderProcessElapsed();
+    }
+  }
+
   function resetProcessView(message = "等待新的转写任务。") {
     processStartedAt = 0;
+    processElapsedMs = 0;
     processLogLines = [];
     refs.processStage.textContent = "空闲";
     refs.processProgress.style.width = "0%";
+    refs.processPercent.textContent = "0%";
     refs.processMessage.textContent = message;
-    refs.processLog.hidden = true;
+    refs.processLogRow.hidden = true;
     refs.processLog.innerHTML = "";
     refs.processPanel.classList.remove("has-log");
     refs.toggleProcessLog.hidden = true;
     processLogExpanded = false;
     refs.processPanel.classList.remove("is-log-expanded");
     refs.toggleProcessLog.setAttribute("aria-expanded", "false");
+    refs.toggleProcessLog.querySelector("span")!.textContent = "查看详情";
+    renderProcessElapsed();
     refs.cancelTranscription.disabled = true;
   }
 
   function applyTranscriptionProgress(progress: TranscriptionProgressEvent) {
-    if (!processStartedAt && progress.stage !== "completed" && progress.stage !== "failed") {
-      processStartedAt = Date.now();
+    if (!processStartedAt && progress.stage !== "completed" && progress.stage !== "failed" && progress.stage !== "cancelled") {
+      startProcessClock();
     }
     const stageLabel =
       progress.stage === "queued" ? "准备" :
@@ -839,7 +930,6 @@ export function mountApp(root: HTMLDivElement) {
       progress.stage === "completed" ? "完成" :
       progress.stage === "cancelled" ? "已取消" :
       "失败";
-    const elapsedMs = progress.elapsedMs ?? (processStartedAt ? Date.now() - processStartedAt : 0);
     const percent = typeof progress.progress === "number"
       ? progress.progress
       : progress.stage === "transcribing"
@@ -849,28 +939,35 @@ export function mountApp(root: HTMLDivElement) {
           : 0;
 
     refs.processStage.textContent = stageLabel;
-    refs.processProgress.style.width = `${Math.max(0, Math.min(100, percent))}%`;
-    refs.processMessage.textContent = `${progress.message}${elapsedMs ? ` · ${formatDuration(elapsedMs)}` : ""}`;
+    const normalizedPercent = Math.max(0, Math.min(100, percent));
+    refs.processProgress.style.width = `${normalizedPercent}%`;
+    refs.processPercent.textContent = `${Math.round(normalizedPercent)}%`;
+    refs.processMessage.textContent = progress.message;
     refs.processPanel.dataset.stage = progress.stage;
     refs.cancelTranscription.disabled = progress.stage === "completed" || progress.stage === "failed" || progress.stage === "cancelled" || (!isTranscribing && !isLiveTranscribing);
 
     if (progress.detail) {
       processLogLines = [progress.detail, ...processLogLines].slice(0, 80);
-      refs.processLog.hidden = false;
+      refs.processLogRow.hidden = false;
       refs.processPanel.classList.add("has-log");
       refs.toggleProcessLog.hidden = false;
       refs.processLog.innerHTML = processLogLines.map((line) => `<p>${escapeHtml(line)}</p>`).join("");
       refs.processLog.scrollTop = 0;
     }
+    if (progress.stage === "completed" || progress.stage === "failed" || progress.stage === "cancelled") {
+      finishProcessClock();
+    }
   }
 
   async function processResult(task: Promise<TranscriptionResult>) {
     isTranscribing = true;
+    startProcessClock(true);
     setRecorderState("processing");
     applyTranscriptionProgress({ stage: "queued", message: "任务已提交", progress: 5 });
     refs.cancelTranscription.disabled = false;
     try {
       const result = await task;
+      refs.processEngine.textContent = engineDisplayName(result.document.engine.name === "faster-whisper" ? "faster-whisper" : "whisper-cpp");
       renderTranscript(result.document);
       applyTranscriptionProgress({ stage: "completed", message: "转写完成", progress: 100 });
       setStatus(`转写完成，检测语言：${result.document.engine.detectedLanguage || result.document.source.language}`);
@@ -884,6 +981,7 @@ export function mountApp(root: HTMLDivElement) {
         openSettings(true);
       }
     } finally {
+      finishProcessClock();
       isTranscribing = false;
       refs.cancelTranscription.disabled = true;
       cleanupAudio();
@@ -1261,6 +1359,7 @@ export function mountApp(root: HTMLDivElement) {
     refs.transcribeRecording.disabled = true;
     if (liveTranscriptionRequested()) {
       renderTranscript(null);
+      resetProcessView("录音进行中，实时转写开始后会在这里显示进度。");
       refs.transcriptText.placeholder = "正在边录边转写，实时预览会分段追加在这里。";
     }
 
@@ -1581,7 +1680,7 @@ export function mountApp(root: HTMLDivElement) {
     processLogExpanded = !processLogExpanded;
     refs.processPanel.classList.toggle("is-log-expanded", processLogExpanded);
     refs.toggleProcessLog.setAttribute("aria-expanded", String(processLogExpanded));
-    refs.toggleProcessLog.querySelector("span")!.textContent = processLogExpanded ? "收起" : "详情";
+    refs.toggleProcessLog.querySelector("span")!.textContent = processLogExpanded ? "收起详情" : "查看详情";
   });
   refs.exportRecording.addEventListener("click", () => {
     void exportLastRecording();
