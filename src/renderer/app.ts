@@ -263,21 +263,6 @@ export function mountApp(root: HTMLDivElement) {
             </label>
 
             <label class="field">
-              <span>默认识别语言</span>
-              <div id="default-language-select" class="custom-select" data-value="auto">
-                <button class="select-button" type="button" aria-haspopup="listbox" aria-expanded="false">
-                  <span class="select-label">自动检测</span>
-                  <i class="ri-arrow-down-s-line" aria-hidden="true"></i>
-                </button>
-                <div class="select-menu" role="listbox" hidden>
-                  <button type="button" role="option" data-value="auto">自动检测</button>
-                  <button type="button" role="option" data-value="zh">中文</button>
-                  <button type="button" role="option" data-value="en">English</button>
-                </div>
-              </div>
-            </label>
-
-            <label class="field">
               <span>转写引擎</span>
               <div id="transcription-engine-select" class="custom-select" data-value="faster-whisper">
                 <button class="select-button" type="button" aria-haspopup="listbox" aria-expanded="false">
@@ -402,7 +387,6 @@ export function mountApp(root: HTMLDivElement) {
     languageSelect: root.querySelector<HTMLElement>("#language-select")!,
     themeSelect: root.querySelector<HTMLElement>("#theme-select")!,
     closeBehaviorSelect: root.querySelector<HTMLElement>("#close-behavior-select")!,
-    defaultLanguageSelect: root.querySelector<HTMLElement>("#default-language-select")!,
     transcriptionEngineSelect: root.querySelector<HTMLElement>("#transcription-engine-select")!,
     computeModeField: root.querySelector<HTMLElement>("#compute-mode-field")!,
     computeModeLabel: root.querySelector<HTMLSpanElement>("#compute-mode-label")!,
@@ -530,9 +514,7 @@ export function mountApp(root: HTMLDivElement) {
   }
 
   function currentLanguage(): TranscriptLanguage {
-    return windowMode === "compact"
-      ? "auto"
-      : getCustomSelectValue<TranscriptLanguage>(refs.languageSelect);
+    return "auto";
   }
 
   function currentRecordingSource(): RecordingAudioSource {
@@ -638,18 +620,23 @@ export function mountApp(root: HTMLDivElement) {
     }
   }
 
+  function displayPath(filePath: string, tailSegments = 3) {
+    const separator = filePath.includes("\\") ? "\\" : "/";
+    const segments = filePath.split(/[\\/]/).filter(Boolean);
+    if (segments.length <= tailSegments) return filePath;
+    return `…${separator}${segments.slice(-tailSegments).join(separator)}`;
+  }
+
   function setPathText(element: HTMLElement, filePath: string, emptyText: string) {
-    element.textContent = filePath || emptyText;
-    element.toggleAttribute("data-tail-path", Boolean(filePath));
+    element.textContent = filePath ? displayPath(filePath) : emptyText;
     element.title = filePath;
   }
 
   function renderSelectedFilePath() {
     const fileName = selectedFilePath.split(/[\\/]/).filter(Boolean).pop() || selectedFilePath;
     refs.selectedFile.textContent = selectedFilePath
-      ? windowMode === "compact" ? fileName : selectedFilePath
+      ? windowMode === "compact" ? fileName : displayPath(selectedFilePath)
       : "未选择文件";
-    refs.selectedFile.toggleAttribute("data-tail-path", Boolean(selectedFilePath && windowMode !== "compact"));
     refs.selectedFile.title = selectedFilePath;
   }
 
@@ -703,7 +690,6 @@ export function mountApp(root: HTMLDivElement) {
   function syncPreferencesToUi() {
     setCustomSelectValue(refs.themeSelect, preferences.theme, true);
     setCustomSelectValue(refs.closeBehaviorSelect, preferences.closeBehavior, true);
-    setCustomSelectValue(refs.defaultLanguageSelect, preferences.defaultLanguage, true);
     setCustomSelectValue(refs.transcriptionEngineSelect, preferences.transcriptionEngine, true);
     const whisperCpuOnly = preferences.transcriptionEngine === "whisper-cpp";
     refs.computeModeField.classList.toggle("is-disabled", whisperCpuOnly);
@@ -949,10 +935,11 @@ export function mountApp(root: HTMLDivElement) {
     refs.cancelTranscription.disabled = progress.stage === "completed" || progress.stage === "failed" || progress.stage === "cancelled" || (!isTranscribing && !isLiveTranscribing);
 
     const rawDetail = progress.detail?.trim();
-    const compactStageDetail = (() => {
-      if (windowMode !== "compact") return rawDetail;
-      const singleLineDetail = rawDetail?.replace(/\s+/g, " ");
-      if (singleLineDetail && /[\u3400-\u9fff]/.test(singleLineDetail)) return singleLineDetail;
+    const displayDetail = (() => {
+      const hasChineseDetail = Boolean(rawDetail && /[\u3400-\u9fff]/.test(rawDetail));
+      if (hasChineseDetail) {
+        return windowMode === "compact" ? rawDetail!.replace(/\s+/g, " ") : rawDetail;
+      }
       const action =
         progress.stage === "queued" ? "正在准备转写任务" :
         progress.stage === "normalizing" ? "正在转换音频格式" :
@@ -964,8 +951,8 @@ export function mountApp(root: HTMLDivElement) {
       return `${action}，当前进度 ${Math.round(normalizedPercent)}%，已用时 ${formatDuration(progress.elapsedMs ?? processElapsedMs)}`;
     })();
 
-    if (compactStageDetail) {
-      processLogLines = [compactStageDetail, ...processLogLines].slice(0, 80);
+    if (displayDetail) {
+      processLogLines = [displayDetail, ...processLogLines].slice(0, 80);
       refs.processLogRow.hidden = false;
       refs.processPanel.classList.add("has-log");
       refs.processLog.innerHTML = processLogLines.map((line) => `<p>${escapeHtml(line)}</p>`).join("");
@@ -1558,7 +1545,6 @@ export function mountApp(root: HTMLDivElement) {
     refs.languageSelect,
     refs.themeSelect,
     refs.closeBehaviorSelect,
-    refs.defaultLanguageSelect,
     refs.transcriptionEngineSelect,
     refs.recordingSourceSelect
   ].forEach(bindCustomSelect);
@@ -1724,10 +1710,6 @@ export function mountApp(root: HTMLDivElement) {
   });
   onCustomSelectChange(refs.closeBehaviorSelect, async () => {
     preferences.closeBehavior = getCustomSelectValue<AppPreferences["closeBehavior"]>(refs.closeBehaviorSelect);
-    await persistPreferences();
-  });
-  onCustomSelectChange(refs.defaultLanguageSelect, async () => {
-    preferences.defaultLanguage = getCustomSelectValue<TranscriptLanguage>(refs.defaultLanguageSelect);
     await persistPreferences();
   });
   onCustomSelectChange(refs.transcriptionEngineSelect, async () => {

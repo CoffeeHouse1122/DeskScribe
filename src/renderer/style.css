@@ -531,11 +531,7 @@ h2 i {
 }
 
 .transcript-panel .language-field {
-  width: 190px;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 9px;
+  display: none;
 }
 
 .transcript-stats {
@@ -645,10 +641,17 @@ h2 i {
   white-space: nowrap;
 }
 
-#selected-file[data-tail-path],
-#export-path[data-tail-path] {
-  direction: rtl;
+#selected-file,
+#export-path {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  padding: 0 9px;
+  direction: ltr;
   text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-strong);
 }
 
 code {
@@ -988,13 +991,11 @@ code {
 }
 
 .process-status-row .status-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text);
+  display: none;
 }
 
 .process-status-row .danger-button {
+  grid-column: 3;
   width: auto;
   height: 32px;
 }
@@ -1026,13 +1027,7 @@ code {
 }
 
 .process-engine-summary {
-  min-height: 24px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--muted);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
+  display: none;
 }
 
 .process-engine-summary > i {
