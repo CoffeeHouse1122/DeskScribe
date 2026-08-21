@@ -23,6 +23,7 @@ const LIVE_TRANSCRIPTION_MIN_SECONDS = 3;
 const LIVE_TRANSCRIPTION_OVERLAP_SECONDS = 2;
 const LIVE_PCM_SAMPLE_RATE = 16000;
 const WINDOW_MODE_STORAGE_KEY = "deskscribe.window-mode";
+const COMPACT_PROCESS_LOG_LINE_HEIGHT = 15;
 
 const defaultPreferences: AppPreferences = {
   theme: "system",
@@ -577,6 +578,9 @@ export function mountApp(root: HTMLDivElement) {
     refs.maximizeWindow.title = "最大化";
     refs.maximizeWindow.setAttribute("aria-label", "最大化");
     refs.maximizeWindow.querySelector("i")!.className = "ri-checkbox-blank-line";
+    if (isCompact) {
+      refs.processLog.scrollTop = 0;
+    }
     renderSelectedFilePath();
   }
 
@@ -1689,6 +1693,16 @@ export function mountApp(root: HTMLDivElement) {
     }
     void window.deskScribe.cancelTranscription();
   });
+  refs.processLog.addEventListener("wheel", (event) => {
+    if (windowMode !== "compact" || event.deltaY === 0) return;
+    const maxScrollTop = Math.max(0, refs.processLog.scrollHeight - refs.processLog.clientHeight);
+    if (maxScrollTop === 0) return;
+    event.preventDefault();
+    const currentLine = Math.round(refs.processLog.scrollTop / COMPACT_PROCESS_LOG_LINE_HEIGHT);
+    const lastLine = Math.ceil(maxScrollTop / COMPACT_PROCESS_LOG_LINE_HEIGHT);
+    const nextLine = Math.max(0, Math.min(lastLine, currentLine + (event.deltaY > 0 ? 1 : -1)));
+    refs.processLog.scrollTop = nextLine * COMPACT_PROCESS_LOG_LINE_HEIGHT;
+  }, { passive: false });
   refs.exportRecording.addEventListener("click", () => {
     void exportLastRecording();
   });

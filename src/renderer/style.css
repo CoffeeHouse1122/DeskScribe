@@ -1697,6 +1697,7 @@ code {
   contain: paint;
   clip-path: inset(0);
   overscroll-behavior: contain;
+  scroll-snap-type: y mandatory;
   scrollbar-width: none;
 }
 
@@ -1715,6 +1716,8 @@ code {
   overflow-wrap: normal;
   text-overflow: ellipsis;
   white-space: nowrap;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
 }
 
 .shell[data-window-mode="compact"] .progress-track {
