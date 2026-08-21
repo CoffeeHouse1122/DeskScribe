@@ -3,6 +3,12 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import path from "node:path";
+import {
+  downloadWithModelFallback,
+  isModelDownloadAbortError,
+  modelDownloadSources,
+  type ModelDownloadSource
+} from "./model-download-policy";
 import type {
   FasterWhisperModel,
   ManagedModelId,
@@ -16,7 +22,7 @@ interface ModelFileDefinition {
   fileName: string;
   size: number;
   sha256?: string;
-  url: string;
+  sources: readonly ModelDownloadSource[];
 }
 
 interface ModelDefinition {
@@ -38,17 +44,19 @@ const WHISPER_CPP_REVISION = "5359861c739e955e79d9a303bcbc70fb988958b1";
 const TURBO_REVISION = "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf";
 const DISTIL_REVISION = "c3058b475261292e64a0412df1d2681c06260fab";
 
-function huggingFaceUrl(repository: string, revision: string, fileName: string) {
-  return `https://huggingface.co/${repository}/resolve/${revision}/${encodeURIComponent(fileName)}?download=true`;
-}
-
-function fasterWhisperFiles(repository: string, revision: string, sizes: Record<string, number>, modelSha256: string) {
+function fasterWhisperFiles(
+  githubAssetPrefix: string,
+  repository: string,
+  revision: string,
+  sizes: Record<string, number>,
+  modelSha256: string
+) {
   return ["config.json", "model.bin", "preprocessor_config.json", "tokenizer.json", "vocabulary.json"].map(
     (fileName): ModelFileDefinition => ({
       fileName,
       size: sizes[fileName],
       sha256: fileName === "model.bin" ? modelSha256 : undefined,
-      url: huggingFaceUrl(repository, revision, fileName)
+      sources: modelDownloadSources(`${githubAssetPrefix}-${fileName}`, repository, revision, fileName)
     })
   );
 }
@@ -65,6 +73,7 @@ const MODEL_CATALOG: readonly ModelDefinition[] = [
     version: "1",
     recommended: true,
     files: fasterWhisperFiles(
+      "large-v3-turbo",
       "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
       TURBO_REVISION,
       {
@@ -88,6 +97,7 @@ const MODEL_CATALOG: readonly ModelDefinition[] = [
     version: "1",
     recommended: false,
     files: fasterWhisperFiles(
+      "distil-large-v3",
       "Systran/faster-distil-whisper-large-v3",
       DISTIL_REVISION,
       {
@@ -115,7 +125,7 @@ const MODEL_CATALOG: readonly ModelDefinition[] = [
         fileName: "ggml-small.bin",
         size: 487601967,
         sha256: "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
-        url: huggingFaceUrl("ggerganov/whisper.cpp", WHISPER_CPP_REVISION, "ggml-small.bin")
+        sources: modelDownloadSources("ggml-small.bin", "ggerganov/whisper.cpp", WHISPER_CPP_REVISION, "ggml-small.bin")
       }
     ]
   },
@@ -134,7 +144,12 @@ const MODEL_CATALOG: readonly ModelDefinition[] = [
         fileName: "ggml-large-v3-q5_0.bin",
         size: 1081140203,
         sha256: "d75795ecff3f83b5faa89d1900604ad8c780abd5739fae406de19f23ecd98ad1",
-        url: huggingFaceUrl("ggerganov/whisper.cpp", WHISPER_CPP_REVISION, "ggml-large-v3-q5_0.bin")
+        sources: modelDownloadSources(
+          "ggml-large-v3-q5_0.bin",
+          "ggerganov/whisper.cpp",
+          WHISPER_CPP_REVISION,
+          "ggml-large-v3-q5_0.bin"
+        )
       }
     ]
   }
@@ -301,25 +316,17 @@ function progressEvent(
   };
 }
 
-async function downloadFile(
+async function downloadFileFromSource(
   definition: ModelDefinition,
   file: ModelFileDefinition,
+  source: ModelDownloadSource,
   completedBeforeFile: number,
   totalBytes: number,
   controller: AbortController,
-  report: ProgressReporter
+  report: ProgressReporter,
+  targetPath: string,
+  partPath: string
 ) {
-  const directory = modelDirectory(definition);
-  const targetPath = path.join(directory, file.fileName);
-  const partPath = `${targetPath}.part`;
-  assertManagedPath(targetPath);
-  await fs.mkdir(directory, { recursive: true });
-
-  if (await fileMatches(targetPath, file.size)) {
-    report(progressEvent(definition.id, "downloading", completedBeforeFile + file.size, totalBytes, `已存在 ${file.fileName}`));
-    return;
-  }
-
   const partialStat = await fs.stat(partPath).catch(() => null);
   let downloadedBytes = partialStat?.isFile() ? partialStat.size : 0;
   if (downloadedBytes > file.size) {
@@ -340,17 +347,17 @@ async function downloadFile(
   }
 
   const headers = downloadedBytes > 0 ? { Range: `bytes=${downloadedBytes}-` } : undefined;
-  let response = await net.fetch(file.url, { headers, signal: controller.signal });
+  let response = await net.fetch(source.url, { headers, signal: controller.signal });
   if (downloadedBytes > 0 && response.status === 200) {
     await fs.rm(partPath, { force: true });
     downloadedBytes = 0;
-    response = await net.fetch(file.url, { signal: controller.signal });
+    response = await net.fetch(source.url, { signal: controller.signal });
   }
   if (response.status !== 200 && response.status !== 206) {
-    throw new Error(`下载 ${file.fileName} 失败：HTTP ${response.status}`);
+    throw new Error(`${source.label} 下载 ${file.fileName} 失败：HTTP ${response.status}`);
   }
   if (!response.body) {
-    throw new Error(`下载 ${file.fileName} 失败：服务器未返回文件内容。`);
+    throw new Error(`${source.label} 下载 ${file.fileName} 失败：服务器未返回文件内容。`);
   }
 
   const handle = await fs.open(partPath, downloadedBytes > 0 ? "a" : "w");
@@ -371,7 +378,7 @@ async function downloadFile(
           "downloading",
           completedBeforeFile + downloadedBytes,
           totalBytes,
-          `正在下载 ${definition.displayName}`
+          `正在从 ${source.label} 下载 ${definition.displayName}`
         ));
       }
     }
@@ -391,8 +398,51 @@ async function downloadFile(
   );
 }
 
-function isAbortError(error: unknown) {
-  return error instanceof Error && (error.name === "AbortError" || /aborted/i.test(error.message));
+async function downloadFile(
+  definition: ModelDefinition,
+  file: ModelFileDefinition,
+  completedBeforeFile: number,
+  totalBytes: number,
+  controller: AbortController,
+  report: ProgressReporter
+) {
+  const directory = modelDirectory(definition);
+  const targetPath = path.join(directory, file.fileName);
+  const partPath = `${targetPath}.part`;
+  assertManagedPath(targetPath);
+  await fs.mkdir(directory, { recursive: true });
+
+  if (await fileMatches(targetPath, file.size)) {
+    report(progressEvent(definition.id, "downloading", completedBeforeFile + file.size, totalBytes, `已存在 ${file.fileName}`));
+    return;
+  }
+
+  await downloadWithModelFallback(
+    file.sources,
+    async (source) => {
+      await downloadFileFromSource(
+        definition,
+        file,
+        source,
+        completedBeforeFile,
+        totalBytes,
+        controller,
+        report,
+        targetPath,
+        partPath
+      );
+    },
+    async (source, fallback) => {
+      const partialBytes = (await fs.stat(partPath).catch(() => null))?.size ?? 0;
+      report(progressEvent(
+        definition.id,
+        "downloading",
+        completedBeforeFile + Math.min(file.size, partialBytes),
+        totalBytes,
+        `${source.label} 下载失败，正在切换到 ${fallback.label}`
+      ));
+    }
+  );
 }
 
 export async function downloadManagedModel(modelId: ManagedModelId, report: ProgressReporter) {
@@ -425,7 +475,7 @@ export async function downloadManagedModel(modelId: ManagedModelId, report: Prog
     }
     report(progressEvent(modelId, "completed", totalBytes, totalBytes, `${definition.displayName} 已安装`));
   } catch (error) {
-    if (isAbortError(error)) {
+    if (isModelDownloadAbortError(error)) {
       report(progressEvent(modelId, "cancelled", 0, totalBytes, `${definition.displayName} 下载已暂停`));
       return;
     }
