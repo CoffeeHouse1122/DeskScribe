@@ -216,6 +216,7 @@ class FasterWhisperRuntime:
             "best_of": 1,
             "vad_filter": True,
             "condition_on_previous_text": False,
+            "without_timestamps": False,
             "no_speech_threshold": 0.6,
             "vad_parameters": {
                 "threshold": 0.35,
