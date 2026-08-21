@@ -65,18 +65,17 @@ assert.equal(
   "正在使用 Faster-Whisper 识别语音内容（1/2）"
 );
 
-const fixedTime = new Date(2026, 7, 21, 14, 32, 10);
 assert.equal(
-  formatRuntimeProgressDetail("size= 100kB time=00:01:23.45 bitrate=12.0kbits/s speed=25.5x", "normalizing", fixedTime),
-  "[14:32:10] 音频转换进度 00:01:23.45，处理速度 25.5 倍"
+  formatRuntimeProgressDetail("size= 100kB time=00:01:23.45 bitrate=12.0kbits/s speed=25.5x", "normalizing"),
+  "音频转换进度 00:01:23.45，处理速度 25.5 倍"
 );
 assert.equal(
-  formatRuntimeProgressDetail("[00:00:10.000 --> 00:00:12.000] 你好，世界", "transcribing", fixedTime),
-  "[14:32:10] 识别片段 00:00:10.000–00:00:12.000：你好，世界"
+  formatRuntimeProgressDetail("[00:00:10.000 --> 00:00:12.000] 你好，世界", "transcribing"),
+  "识别片段 00:00:10.000–00:00:12.000：你好，世界"
 );
 assert.equal(
-  formatProgressStatusDetail("正在识别语音内容（1/3）", 42.4, 65000, fixedTime),
-  "[14:32:10] 正在识别语音内容（1/3），当前进度 42%，本阶段用时 01:05"
+  formatProgressStatusDetail("正在识别语音内容（1/3）", 42.4, 65000),
+  "正在识别语音内容（1/3），当前进度 42%，本阶段用时 01:05"
 );
 
 console.log("Transcription policy regression checks passed.");

@@ -46,12 +46,6 @@ export function formatFasterWhisperProgressMessage(message: string, device?: str
   return message.replace("Faster-Whisper", runtimeName);
 }
 
-function timestampLabel(now: Date) {
-  return [now.getHours(), now.getMinutes(), now.getSeconds()]
-    .map((value) => String(value).padStart(2, "0"))
-    .join(":");
-}
-
 function shortDuration(timeMs: number) {
   const totalSeconds = Math.max(0, Math.floor(timeMs / 1000));
   const minutes = Math.floor(totalSeconds / 60);
@@ -61,35 +55,32 @@ function shortDuration(timeMs: number) {
 
 export function formatRuntimeProgressDetail(
   line: string,
-  stage: TranscriptionStage,
-  now = new Date()
+  stage: TranscriptionStage
 ) {
-  const prefix = `[${timestampLabel(now)}]`;
   const segment = line.match(/\[([^\]]+?)\s*-->\s*([^\]]+?)\]\s*([^\r\n]*)/);
   if (segment) {
     const text = segment[3]?.trim();
-    return `${prefix} 识别片段 ${segment[1]?.trim()}–${segment[2]?.trim()}${text ? `：${text}` : ""}`;
+    return `识别片段 ${segment[1]?.trim()}–${segment[2]?.trim()}${text ? `：${text}` : ""}`;
   }
 
   const ffmpegTime = line.match(/time=\s*(\d{2}:\d{2}:\d{2}(?:\.\d+)?)/i)?.[1];
   const speed = line.match(/speed=\s*([\d.]+)x/i)?.[1];
   if (ffmpegTime) {
-    return `${prefix} 音频转换进度 ${ffmpegTime}${speed ? `，处理速度 ${speed} 倍` : ""}`;
+    return `音频转换进度 ${ffmpegTime}${speed ? `，处理速度 ${speed} 倍` : ""}`;
   }
 
   const percent = line.match(/(?:progress\s*=\s*|^|\s)(\d{1,3}(?:\.\d+)?)\s*%/i)?.[1];
   if (percent) {
-    return `${prefix} 语音识别进度 ${Math.round(Number(percent))}%`;
+    return `语音识别进度 ${Math.round(Number(percent))}%`;
   }
 
-  return `${prefix} ${stage === "normalizing" ? "正在转换音频格式" : "识别引擎正在处理音频"}`;
+  return stage === "normalizing" ? "正在转换音频格式" : "识别引擎正在处理音频";
 }
 
 export function formatProgressStatusDetail(
   message: string,
   percent: number,
-  elapsedMs: number,
-  now = new Date()
+  elapsedMs: number
 ) {
-  return `[${timestampLabel(now)}] ${message}，当前进度 ${Math.round(percent)}%，本阶段用时 ${shortDuration(elapsedMs)}`;
+  return `${message}，当前进度 ${Math.round(percent)}%，本阶段用时 ${shortDuration(elapsedMs)}`;
 }
