@@ -180,9 +180,6 @@ export function mountApp(root: HTMLDivElement) {
             <div class="process-log-row" hidden>
               <span class="process-log-dot" aria-hidden="true"></span>
               <div id="process-log" class="process-log"></div>
-              <button id="toggle-process-log" class="log-toggle" type="button" aria-expanded="false" hidden>
-                <span>查看详情</span>
-              </button>
             </div>
           </article>
 
@@ -375,7 +372,6 @@ export function mountApp(root: HTMLDivElement) {
     processMessage: root.querySelector<HTMLParagraphElement>("#process-message")!,
     processLog: root.querySelector<HTMLDivElement>("#process-log")!,
     processLogRow: root.querySelector<HTMLElement>(".process-log-row")!,
-    toggleProcessLog: root.querySelector<HTMLButtonElement>("#toggle-process-log")!,
     processEngine: root.querySelector<HTMLElement>("#process-engine")!,
     processElapsed: root.querySelector<HTMLElement>("#process-elapsed")!,
     cpuUsage: root.querySelector<HTMLElement>("#cpu-usage")!,
@@ -457,7 +453,6 @@ export function mountApp(root: HTMLDivElement) {
   let processStartedAt = 0;
   let processElapsedMs = 0;
   let processLogLines: string[] = [];
-  let processLogExpanded = false;
   let isTranscribing = false;
   let metricsRequestInFlight = false;
 
@@ -879,13 +874,9 @@ export function mountApp(root: HTMLDivElement) {
       if (force) {
         refs.processPanel.dataset.stage = "queued";
         processLogLines = [];
-        processLogExpanded = false;
         refs.processLog.innerHTML = "";
         refs.processLogRow.hidden = true;
-        refs.processPanel.classList.remove("has-log", "is-log-expanded");
-        refs.toggleProcessLog.hidden = true;
-        refs.toggleProcessLog.setAttribute("aria-expanded", "false");
-        refs.toggleProcessLog.querySelector("span")!.textContent = "查看详情";
+        refs.processPanel.classList.remove("has-log");
       }
       renderProcessElapsed();
     }
@@ -909,11 +900,6 @@ export function mountApp(root: HTMLDivElement) {
     refs.processLogRow.hidden = true;
     refs.processLog.innerHTML = "";
     refs.processPanel.classList.remove("has-log");
-    refs.toggleProcessLog.hidden = true;
-    processLogExpanded = false;
-    refs.processPanel.classList.remove("is-log-expanded");
-    refs.toggleProcessLog.setAttribute("aria-expanded", "false");
-    refs.toggleProcessLog.querySelector("span")!.textContent = "查看详情";
     renderProcessElapsed();
     refs.cancelTranscription.disabled = true;
   }
@@ -950,7 +936,6 @@ export function mountApp(root: HTMLDivElement) {
       processLogLines = [progress.detail, ...processLogLines].slice(0, 80);
       refs.processLogRow.hidden = false;
       refs.processPanel.classList.add("has-log");
-      refs.toggleProcessLog.hidden = false;
       refs.processLog.innerHTML = processLogLines.map((line) => `<p>${escapeHtml(line)}</p>`).join("");
       refs.processLog.scrollTop = 0;
     }
@@ -1675,12 +1660,6 @@ export function mountApp(root: HTMLDivElement) {
       setStatus("正在取消转写。");
     }
     void window.deskScribe.cancelTranscription();
-  });
-  refs.toggleProcessLog.addEventListener("click", () => {
-    processLogExpanded = !processLogExpanded;
-    refs.processPanel.classList.toggle("is-log-expanded", processLogExpanded);
-    refs.toggleProcessLog.setAttribute("aria-expanded", String(processLogExpanded));
-    refs.toggleProcessLog.querySelector("span")!.textContent = processLogExpanded ? "收起详情" : "查看详情";
   });
   refs.exportRecording.addEventListener("click", () => {
     void exportLastRecording();

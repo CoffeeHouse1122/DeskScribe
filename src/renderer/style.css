@@ -810,7 +810,6 @@ code {
 .primary-button:focus-visible,
 .ghost-button:focus-visible,
 .titlebar-button:focus-visible,
-.log-toggle:focus-visible,
 .select-button:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent) 62%, transparent);
   outline-offset: 2px;
@@ -1042,8 +1041,8 @@ code {
   min-width: 0;
   min-height: 32px;
   display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) auto;
-  align-items: center;
+  grid-template-columns: 8px minmax(0, 1fr);
+  align-items: stretch;
   gap: 9px;
   margin-top: 5px;
   border-top: 1px solid var(--line);
@@ -1058,29 +1057,7 @@ code {
   height: 6px;
   border-radius: 50%;
   background: var(--accent);
-}
-
-.log-toggle {
-  flex: none;
-  height: 24px;
-  padding: 0 6px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--accent-strong);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.log-toggle:hover {
-  background: var(--accent-soft);
-}
-
-.log-toggle[hidden] {
-  display: none;
+  margin-top: 12px;
 }
 
 .progress-fill {
@@ -1101,8 +1078,10 @@ code {
 
 .process-log {
   display: block;
+  height: 100%;
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   margin: 0;
   padding: 7px 0;
   border: 0;
@@ -1115,35 +1094,10 @@ code {
   scrollbar-color: color-mix(in srgb, var(--accent) 40%, transparent) transparent;
 }
 
-.process-panel:not(.is-log-expanded) .process-log {
-  height: 31px;
-  min-height: 31px;
-  overflow: hidden;
-}
-
-.process-panel:not(.is-log-expanded) .process-log p:not(:first-child) {
-  display: none;
-}
-
-.process-panel:not(.is-log-expanded) .process-log p:first-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .process-log p {
   margin: 0;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
-}
-
-.process-panel.is-log-expanded .process-log-row {
-  align-items: start;
-}
-
-.process-panel.is-log-expanded .process-log {
-  max-height: 92px;
-  padding-right: 4px;
 }
 
 .settings-panel {
@@ -1599,10 +1553,6 @@ code {
   height: 132px;
 }
 
-.shell[data-window-mode="compact"] .process-panel.is-log-expanded {
-  height: 222px;
-}
-
 .shell[data-window-mode="compact"] .process-title-row {
   min-height: 0;
   display: block;
@@ -1729,11 +1679,6 @@ code {
   scrollbar-width: none;
 }
 
-.shell[data-window-mode="compact"] .process-panel.is-log-expanded .process-log {
-  height: auto;
-  min-height: 54px;
-}
-
 .shell[data-window-mode="compact"] .process-log::-webkit-scrollbar {
   display: none;
 }
@@ -1806,10 +1751,6 @@ code {
 .shell[data-window-mode="compact"] .process-log-row {
   min-height: 28px;
   margin-top: 2px;
-}
-
-.shell[data-window-mode="compact"] .log-toggle {
-  padding-right: 1px;
 }
 
 .shell[data-window-mode="compact"] .transcript-panel {
