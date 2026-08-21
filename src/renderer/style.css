@@ -1685,15 +1685,17 @@ code {
 
 .shell[data-window-mode="compact"] .process-log {
   display: block;
-  height: 25px;
-  min-height: 25px;
-  max-height: 25px;
-  margin: 0;
-  padding: 5px 0;
+  height: 15px;
+  min-height: 15px;
+  max-height: 15px;
+  margin: 5px 0;
+  padding: 0;
   overflow-x: hidden;
   overflow-y: auto;
   border-radius: 0;
   line-height: 15px;
+  contain: paint;
+  clip-path: inset(0);
   overscroll-behavior: contain;
   scrollbar-width: none;
 }
@@ -1785,7 +1787,11 @@ code {
 }
 
 .shell[data-window-mode="compact"] .transcript-panel {
-  gap: 8px;
+  gap: 6px;
+}
+
+.shell[data-window-mode="compact"] .transcript-panel > .panel-title {
+  min-height: 24px;
 }
 
 .shell[data-window-mode="compact"] .transcript-text {
