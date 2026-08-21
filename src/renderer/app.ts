@@ -163,7 +163,7 @@ export function mountApp(root: HTMLDivElement) {
                   <span class="resource-meter" aria-hidden="true"><i id="cpu-usage-bar"></i></span>
                 </div>
                 <div class="resource-metric" title="整机 GPU 利用率，仅用于监控；实际转写设备请查看执行日志">
-                  <span>系统GPU</span>
+                  <span>GPU</span>
                   <strong id="gpu-usage">—</strong>
                   <span class="resource-meter" aria-hidden="true"><i id="gpu-usage-bar"></i></span>
                 </div>
@@ -201,20 +201,6 @@ export function mountApp(root: HTMLDivElement) {
               <div>
                 <h2><i class="ri-file-text-line" aria-hidden="true"></i><span>转写结果</span></h2>
               </div>
-              <label class="language-field">
-                <span>语言</span>
-                <div id="language-select" class="custom-select" data-value="auto">
-                  <button class="select-button" type="button" aria-haspopup="listbox" aria-expanded="false">
-                    <span class="select-label">自动检测</span>
-                    <i class="ri-arrow-down-s-line" aria-hidden="true"></i>
-                  </button>
-                  <div class="select-menu" role="listbox" hidden>
-                    <button type="button" role="option" data-value="auto">自动检测</button>
-                    <button type="button" role="option" data-value="zh">中文</button>
-                    <button type="button" role="option" data-value="en">English</button>
-                  </div>
-                </div>
-              </label>
             </div>
 
             <textarea
@@ -396,7 +382,6 @@ export function mountApp(root: HTMLDivElement) {
     transcriptProcessDuration: root.querySelector<HTMLElement>("#transcript-process-duration")!,
     exportPath: root.querySelector<HTMLElement>("#export-path")!,
     exportButtons: Array.from(root.querySelectorAll<HTMLButtonElement>(".export-button")),
-    languageSelect: root.querySelector<HTMLElement>("#language-select")!,
     themeSelect: root.querySelector<HTMLElement>("#theme-select")!,
     closeBehaviorSelect: root.querySelector<HTMLElement>("#close-behavior-select")!,
     transcriptionEngineSelect: root.querySelector<HTMLElement>("#transcription-engine-select")!,
@@ -725,7 +710,6 @@ export function mountApp(root: HTMLDivElement) {
     refs.whisperThreadsInput.max = String(Math.max(1, navigator.hardwareConcurrency || 4));
     refs.whisperThreadsInput.value = String(Math.max(0, Math.min(preferences.whisperThreads || 0, Number(refs.whisperThreadsInput.max))));
     refs.exportDirectoryInput.value = preferences.exportDirectory;
-    setCustomSelectValue(refs.languageSelect, preferences.defaultLanguage, true);
     refs.processEngine.textContent = engineDisplayName();
     applyTheme(preferences.theme);
     renderModelLibrary();
@@ -1566,7 +1550,6 @@ export function mountApp(root: HTMLDivElement) {
   }
 
   [
-    refs.languageSelect,
     refs.themeSelect,
     refs.closeBehaviorSelect,
     refs.transcriptionEngineSelect,

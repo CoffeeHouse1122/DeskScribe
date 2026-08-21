@@ -460,7 +460,7 @@ h2 i {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
-  width: min(330px, 65%);
+  width: min(310px, 62%);
   margin-left: auto;
 }
 
@@ -523,17 +523,13 @@ h2 i {
 .transcript-panel {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 10px;
+  gap: 7px;
   padding-bottom: 12px;
   overflow: hidden;
 }
 
 .transcript-panel > .panel-title {
-  min-height: 40px;
-}
-
-.transcript-panel .language-field {
-  display: none;
+  min-height: 24px;
 }
 
 .transcript-stats {
@@ -926,14 +922,12 @@ code {
 }
 
 
-.language-field,
 .field,
 .field-block {
   display: grid;
   gap: 3px;
 }
 
-.language-field span,
 .field span {
   font-size: 11px;
   color: var(--muted);
@@ -1853,10 +1847,6 @@ code {
 
 .shell[data-window-mode="compact"] .transcript-text {
   padding: 9px 10px;
-}
-
-.shell[data-window-mode="compact"] .language-field {
-  display: none;
 }
 
 .shell[data-window-mode="compact"] .transcript-stats {
