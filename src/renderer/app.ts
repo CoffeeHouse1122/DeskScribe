@@ -529,7 +529,9 @@ export function mountApp(root: HTMLDivElement) {
   }
 
   function currentLanguage(): TranscriptLanguage {
-    return getCustomSelectValue<TranscriptLanguage>(refs.languageSelect);
+    return windowMode === "compact"
+      ? "auto"
+      : getCustomSelectValue<TranscriptLanguage>(refs.languageSelect);
   }
 
   function currentRecordingSource(): RecordingAudioSource {
@@ -575,6 +577,7 @@ export function mountApp(root: HTMLDivElement) {
     refs.maximizeWindow.title = "最大化";
     refs.maximizeWindow.setAttribute("aria-label", "最大化");
     refs.maximizeWindow.querySelector("i")!.className = "ri-checkbox-blank-line";
+    renderSelectedFilePath();
   }
 
   function initialWindowMode(): WindowMode {
@@ -635,6 +638,15 @@ export function mountApp(root: HTMLDivElement) {
     element.textContent = filePath || emptyText;
     element.toggleAttribute("data-tail-path", Boolean(filePath));
     element.title = filePath;
+  }
+
+  function renderSelectedFilePath() {
+    const fileName = selectedFilePath.split(/[\\/]/).filter(Boolean).pop() || selectedFilePath;
+    refs.selectedFile.textContent = selectedFilePath
+      ? windowMode === "compact" ? fileName : selectedFilePath
+      : "未选择文件";
+    refs.selectedFile.toggleAttribute("data-tail-path", Boolean(selectedFilePath && windowMode !== "compact"));
+    refs.selectedFile.title = selectedFilePath;
   }
 
   function syncRecorderProcessState(next: RecorderState) {
@@ -932,8 +944,24 @@ export function mountApp(root: HTMLDivElement) {
     refs.processPanel.dataset.stage = progress.stage;
     refs.cancelTranscription.disabled = progress.stage === "completed" || progress.stage === "failed" || progress.stage === "cancelled" || (!isTranscribing && !isLiveTranscribing);
 
-    if (progress.detail) {
-      processLogLines = [progress.detail, ...processLogLines].slice(0, 80);
+    const rawDetail = progress.detail?.trim();
+    const compactStageDetail = (() => {
+      if (windowMode !== "compact") return rawDetail;
+      const singleLineDetail = rawDetail?.replace(/\s+/g, " ");
+      if (singleLineDetail && /[\u3400-\u9fff]/.test(singleLineDetail)) return singleLineDetail;
+      const action =
+        progress.stage === "queued" ? "正在准备转写任务" :
+        progress.stage === "normalizing" ? "正在转换音频格式" :
+        progress.stage === "transcribing" ? "正在识别语音内容" :
+        progress.stage === "finalizing" ? "正在整理转写结果" :
+        progress.stage === "completed" ? "转写已完成" :
+        progress.stage === "cancelled" ? "转写已取消" :
+        "转写执行失败";
+      return `${action}，当前进度 ${Math.round(normalizedPercent)}%，已用时 ${formatDuration(progress.elapsedMs ?? processElapsedMs)}`;
+    })();
+
+    if (compactStageDetail) {
+      processLogLines = [compactStageDetail, ...processLogLines].slice(0, 80);
       refs.processLogRow.hidden = false;
       refs.processPanel.classList.add("has-log");
       refs.processLog.innerHTML = processLogLines.map((line) => `<p>${escapeHtml(line)}</p>`).join("");
@@ -1457,7 +1485,7 @@ export function mountApp(root: HTMLDivElement) {
   async function pickAudioFile() {
     const filePath = await window.deskScribe.selectAudioFile();
     selectedFilePath = filePath || "";
-    setPathText(refs.selectedFile, selectedFilePath, "未选择文件");
+    renderSelectedFilePath();
     refs.transcribeFile.disabled = !selectedFilePath || recorderState !== "idle";
   }
 

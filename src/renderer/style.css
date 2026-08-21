@@ -1546,9 +1546,13 @@ code {
   display: flex;
   align-items: center;
   padding: 0 9px;
+  direction: ltr;
+  text-align: left;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--panel-strong);
+  color: var(--text);
+  font-weight: 600;
 }
 
 .shell[data-window-mode="compact"] .import-panel .button-row {
@@ -1558,13 +1562,13 @@ code {
 .shell[data-window-mode="compact"] .process-panel {
   order: 3;
   position: relative;
-  height: 166px;
+  height: 132px;
   display: block;
   animation-delay: 70ms;
 }
 
 .shell[data-window-mode="compact"] .process-panel:not(.has-log) {
-  height: 132px;
+  height: 98px;
 }
 
 .shell[data-window-mode="compact"] .process-title-row {
@@ -1683,6 +1687,7 @@ code {
   display: block;
   height: 25px;
   min-height: 25px;
+  max-height: 25px;
   margin: 0;
   padding: 5px 0;
   overflow-x: hidden;
@@ -1700,6 +1705,10 @@ code {
 .shell[data-window-mode="compact"] .process-log p {
   display: block;
   width: 100%;
+  height: 15px;
+  min-height: 15px;
+  max-height: 15px;
+  line-height: 15px;
   overflow: hidden;
   overflow-wrap: normal;
   text-overflow: ellipsis;
@@ -1717,9 +1726,11 @@ code {
 }
 
 .shell[data-window-mode="compact"] .resource-metric {
-  height: 36px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 0 9px;
-  row-gap: 5px;
   border: 0;
   border-right: 1px solid var(--line);
   border-radius: 0;
@@ -1753,18 +1764,23 @@ code {
   font-size: 10px;
 }
 
+.shell[data-window-mode="compact"] .resource-meter {
+  display: none;
+}
+
 .shell[data-window-mode="compact"] .process-progress-row {
   gap: 7px;
 }
 
 .shell[data-window-mode="compact"] .process-engine-summary {
-  min-height: 20px;
-  padding: 0 2px;
+  display: none;
 }
 
 .shell[data-window-mode="compact"] .process-log-row {
+  height: 28px;
   min-height: 28px;
-  margin-top: 2px;
+  max-height: 28px;
+  margin-top: 4px;
   padding-inline: 7px;
 }
 
@@ -1777,12 +1793,13 @@ code {
 }
 
 .shell[data-window-mode="compact"] .language-field {
-  width: 154px;
-  gap: 7px;
+  display: none;
 }
 
 .shell[data-window-mode="compact"] .transcript-stats {
-  display: none;
+  min-height: 18px;
+  gap: 8px;
+  font-size: 10px;
 }
 
 .shell[data-window-mode="compact"] .settings-panel {
